@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.space.components
 
 import circlet.arenas.initCircletArenas
@@ -32,16 +32,17 @@ import com.intellij.space.settings.SpaceLoginState
 import com.intellij.space.settings.SpaceServerSettings
 import com.intellij.space.settings.SpaceSettings
 import com.intellij.space.settings.log
+import com.intellij.space.stats.SpaceStatsCounterCollector
 import com.intellij.space.utils.IdeaPasswordSafePersistence
 import com.intellij.space.utils.LifetimedDisposable
 import com.intellij.space.utils.LifetimedDisposableImpl
 import com.intellij.ui.AppIcon
 import com.intellij.util.concurrency.AppExecutorUtil
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.withContext
 import libraries.coroutines.extra.Lifetime
 import libraries.coroutines.extra.launch
 import libraries.coroutines.extra.usingSource
-import libraries.coroutines.extra.withContext
 import libraries.klogging.KLogger
 import libraries.klogging.assert
 import libraries.klogging.logger
@@ -50,7 +51,11 @@ import runtime.mutableUiDispatch
 import runtime.persistence.InMemoryPersistence
 import runtime.persistence.PersistenceConfiguration
 import runtime.persistence.PersistenceKey
-import runtime.reactive.*
+import runtime.reactive.MutableProperty
+import runtime.reactive.Property
+import runtime.reactive.SequentialLifetimes
+import runtime.reactive.mutableProperty
+import runtime.reactive.property.map
 import java.awt.Component
 import java.net.URI
 import java.net.URL
@@ -92,8 +97,6 @@ internal class SpaceWorkspaceComponent : WorkspaceManagerHost(), LifetimedDispos
     }
 
     workspace.forEach(lifetime) { ws ->
-      System.setProperty("space_server_for_script_definition", ws?.client?.server?.let { "$it/system/maven" } ?: "not_set")
-
       loginState.value = if (ws == null) {
         SpaceLoginState.Disconnected(SpaceSettings.getInstance().serverSettings.server)
       }
@@ -122,7 +125,7 @@ internal class SpaceWorkspaceComponent : WorkspaceManagerHost(), LifetimedDispos
 
 
   override suspend fun authFailed() {
-    signOut()
+    signOut(SpaceStatsCounterCollector.LogoutPlace.AUTH_FAIL)
     SpaceAuthNotifier.authFailed()
   }
 
@@ -147,7 +150,7 @@ internal class SpaceWorkspaceComponent : WorkspaceManagerHost(), LifetimedDispos
       return OAuthTokenResponse.Error(server, "", SpaceBundle.message("auth.error.cant.open.browser.label", server))
     }
 
-    val response = withContext(lifetime, AppExecutorUtil.getAppExecutorService().asCoroutineDispatcher()) {
+    val response = withContext(AppExecutorUtil.getAppExecutorService().asCoroutineDispatcher()) {
       codeFlow.handleCodeFlowRedirect(redirectUrl.await())
     }
     if (response is OAuthTokenResponse.Success) {
@@ -159,7 +162,14 @@ internal class SpaceWorkspaceComponent : WorkspaceManagerHost(), LifetimedDispos
     return response
   }
 
-  fun signInManually(serverName: String, uiLifetime: Lifetime, component: Component) {
+  fun signInManually(server:String, uiLifetime: Lifetime, component: Component) {
+    var serverName = server
+    if (serverName.isBlank()) {
+      val error = SpaceBundle.message("login.panel.error.organization.url.should.not.be.empty")
+      loginState.value = SpaceLoginState.Disconnected("", error)
+      return
+    }
+    serverName = normalizeUrl(serverName)
     launch(uiLifetime, Ui) {
       uiLifetime.usingSource { connectLt ->
         try {
@@ -190,7 +200,15 @@ internal class SpaceWorkspaceComponent : WorkspaceManagerHost(), LifetimedDispos
     }
   }
 
-  fun signOut() {
+  private fun normalizeUrl(serverName: String): String {
+    var result = serverName
+    result = if (result.startsWith("https://") || result.startsWith("http://")) result else "https://$result"
+    result = result.removeSuffix("/")
+    return result
+  }
+
+  fun signOut(statsPlace: SpaceStatsCounterCollector.LogoutPlace) {
+    SpaceStatsCounterCollector.LOG_OUT.log(statsPlace)
     val oldManager = manager.value
     oldManager?.signOut(true)
     workspacesLifetimes.clear()
@@ -206,11 +224,17 @@ internal class SpaceWorkspaceComponent : WorkspaceManagerHost(), LifetimedDispos
       return AutoSignInResult.NOT_AUTHORIZED_BEFORE
     }
     val newManager = createWorkspaceManager(wsLifetime, server)
-    return if (newManager.signInNonInteractive()) {
-      manager.value = newManager
-      AutoSignInResult.AUTHORIZED
+    return try {
+      if (newManager.signInNonInteractive()) {
+        manager.value = newManager
+        AutoSignInResult.AUTHORIZED
+      }
+      else {
+        AutoSignInResult.NOT_AUTHORIZED
+      }
     }
-    else {
+    catch (th: Throwable) {
+      LOG.info(th, "Couldn't authorize interactively")
       AutoSignInResult.NOT_AUTHORIZED
     }
   }

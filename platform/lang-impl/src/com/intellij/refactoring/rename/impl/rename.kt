@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.refactoring.rename.impl
 
 import com.intellij.codeInsight.actions.VcsFacade
@@ -8,7 +8,6 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.readAction
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.command.undo.UndoManager
-import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.RangeMarker
 import com.intellij.openapi.fileEditor.FileDocumentManager
@@ -16,6 +15,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogBuilder
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.impl.search.runSearch
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.refactoring.RefactoringBundle
@@ -24,16 +24,18 @@ import com.intellij.refactoring.rename.api.ModifiableRenameUsage
 import com.intellij.refactoring.rename.api.ModifiableRenameUsage.*
 import com.intellij.refactoring.rename.api.RenameTarget
 import com.intellij.refactoring.rename.api.RenameUsage
-import com.intellij.refactoring.rename.api.ReplaceTextTargetContext.IN_COMMENTS_AND_STRINGS
-import com.intellij.refactoring.rename.api.ReplaceTextTargetContext.IN_PLAIN_TEXT
 import com.intellij.refactoring.rename.ui.*
 import com.intellij.util.Query
 import com.intellij.util.text.StringOperation
+import com.intellij.util.ui.UIUtil
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.channels.toList
 import kotlinx.coroutines.flow.asFlow
 import kotlinx.coroutines.flow.fold
 import kotlinx.coroutines.flow.map
+import org.jetbrains.annotations.ApiStatus
+import org.jetbrains.annotations.ApiStatus.Internal
 import org.jetbrains.annotations.TestOnly
 import java.nio.file.Path
 import kotlin.coroutines.CoroutineContext
@@ -41,17 +43,14 @@ import kotlin.coroutines.CoroutineContext
 
 internal typealias UsagePointer = Pointer<out RenameUsage>
 
-internal fun rename(project: Project, target: RenameTarget) {
+/**
+ * Entry point to perform rename with a dialog initialized with [targetName].
+ */
+internal fun showDialogAndRename(project: Project, target: RenameTarget, targetName: String = target.targetName) {
   ApplicationManager.getApplication().assertIsDispatchThread()
-  val canRenameTextOccurrences = !target.textTargets(IN_PLAIN_TEXT).isEmpty()
-  val canRenameCommentAndStringOccurrences = !target.textTargets(IN_COMMENTS_AND_STRINGS).isEmpty()
   val initOptions = RenameDialog.Options(
-    targetName = target.targetName,
-    renameOptions = RenameOptions(
-      renameTextOccurrences = if (canRenameTextOccurrences) true else null,
-      renameCommentsStringsOccurrences = if (canRenameCommentAndStringOccurrences) true else null,
-      searchScope = target.maximalSearchScope ?: GlobalSearchScope.allScope(project)
-    )
+    targetName = targetName,
+    renameOptions = renameOptions(project, target)
   )
   val dialog = RenameDialog(project, target.presentation.presentableText, initOptions)
   if (!dialog.showAndGet()) {
@@ -59,14 +58,39 @@ internal fun rename(project: Project, target: RenameTarget) {
     return
   }
   val (newName: String, options: RenameOptions) = dialog.result()
-  val preview: Boolean = dialog.preview
-  val targetPointer: Pointer<out RenameTarget> = target.createPointer()
-  CoroutineScope(CoroutineName("root rename coroutine")).launch(Dispatchers.Default) {
-    rename(this, project, targetPointer, newName, options, preview)
+  setTextOptions(target, options.textOptions)
+  rename(project, target.createPointer(), newName, options, dialog.preview)
+}
+
+/**
+ * Entry point to perform rename without a dialog.
+ * @param preview whether the user explicitly requested the Preview
+ */
+internal fun rename(
+  project: Project,
+  targetPointer: Pointer<out RenameTarget>,
+  newName: String,
+  options: RenameOptions,
+  preview: Boolean = false
+) {
+  val cs = CoroutineScope(CoroutineName("root rename coroutine"))
+  rename(cs, project, targetPointer, newName, options, preview)
+}
+
+private fun rename(
+  cs: CoroutineScope,
+  project: Project,
+  targetPointer: Pointer<out RenameTarget>,
+  newName: String,
+  options: RenameOptions,
+  preview: Boolean
+): Job {
+  return cs.launch(Dispatchers.Default) {
+    doRename(this, project, targetPointer, newName, options, preview)
   }
 }
 
-private suspend fun rename(
+private suspend fun doRename(
   cs: CoroutineScope,
   project: Project,
   targetPointer: Pointer<out RenameTarget>,
@@ -131,12 +155,15 @@ private data class ProcessUsagesResult(
 )
 
 private suspend fun processUsages(usageChannel: ReceiveChannel<UsagePointer>, newName: String): ProcessUsagesResult {
+  if (ApplicationManager.getApplication().isUnitTestMode) {
+    return ProcessUsagesResult(usageChannel.toList(), false)
+  }
   val usagePointers = ArrayList<UsagePointer>()
   for (pointer: UsagePointer in usageChannel) {
     usagePointers += pointer
     val forcePreview: Boolean? = readAction {
       pointer.dereference()?.let { renameUsage ->
-        renameUsage is TextUsage || renameUsage.conflicts(newName).isNotEmpty()
+        renameUsage is TextRenameUsage || renameUsage.conflicts(newName).isNotEmpty()
       }
     }
     if (forcePreview == true) {
@@ -146,7 +173,8 @@ private suspend fun processUsages(usageChannel: ReceiveChannel<UsagePointer>, ne
   return ProcessUsagesResult(usagePointers, false)
 }
 
-private suspend fun prepareRename(allUsages: Collection<UsagePointer>, newName: String): Pair<FileUpdates?, ModelUpdate?> {
+@ApiStatus.Internal
+suspend fun prepareRename(allUsages: Collection<UsagePointer>, newName: String): Pair<FileUpdates?, ModelUpdate?> {
   return coroutineScope {
     require(!ApplicationManager.getApplication().isReadAccessAllowed)
     val (
@@ -301,4 +329,31 @@ private suspend fun previewInDialog(project: Project, fileUpdates: FileUpdates):
         .showAndGet()
     }
   } != false
+}
+
+@Internal
+@TestOnly
+fun renameAndWait(project: Project, target: RenameTarget, newName: String) {
+  val application = ApplicationManager.getApplication()
+  application.assertIsDispatchThread()
+  require(application.isUnitTestMode)
+
+  val targetPointer = target.createPointer()
+  val options = RenameOptions(
+    textOptions = TextOptions(
+      commentStringOccurrences = true,
+      textOccurrences = true,
+    ),
+    searchScope = target.maximalSearchScope ?: GlobalSearchScope.projectScope(project)
+  )
+  runBlocking {
+    withTimeout(timeMillis = 1000 * 60 * 10) {
+      val renameJob = rename(cs = this@withTimeout, project, targetPointer, newName, options, preview = false)
+      while (renameJob.isActive) {
+        UIUtil.dispatchAllInvocationEvents()
+        delay(timeMillis = 10)
+      }
+    }
+  }
+  PsiDocumentManager.getInstance(project).commitAllDocuments()
 }

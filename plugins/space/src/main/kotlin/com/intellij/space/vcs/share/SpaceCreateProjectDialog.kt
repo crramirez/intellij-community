@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.space.vcs.share
 
 import circlet.client.api.PR_Project
@@ -13,6 +13,7 @@ import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.text.HtmlBuilder
 import com.intellij.space.components.SpaceWorkspaceComponent
 import com.intellij.space.messages.SpaceBundle
+import com.intellij.space.stats.SpaceStatsCounterCollector
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.components.panels.HorizontalLayout
@@ -62,6 +63,7 @@ internal class SpaceCreateProjectDialog(parent: JComponent) : DialogWrapper(pare
   override fun doOKAction() {
     if (!okAction.isEnabled) return
 
+    SpaceStatsCounterCollector.CREATE_NEW_PROJECT.log()
     launch(lifetime, Ui) {
       okAction.isEnabled = false
       asyncProcessIcon.isVisible = true
@@ -119,7 +121,7 @@ internal class SpaceCreateProjectDialog(parent: JComponent) : DialogWrapper(pare
 
   override fun createSouthPanel(): JComponent {
     val buttons = super.createSouthPanel()
-    return JPanel(HorizontalLayout(JBUI.scale(8), SwingConstants.BOTTOM)).apply {
+    return JPanel(HorizontalLayout(8, SwingConstants.BOTTOM)).apply {
       asyncProcessIcon.border = buttons.border
       add(asyncProcessIcon, HorizontalLayout.RIGHT)
       add(buttons, HorizontalLayout.RIGHT)

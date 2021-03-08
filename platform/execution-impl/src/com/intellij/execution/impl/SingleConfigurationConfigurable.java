@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.execution.impl;
 
 import com.intellij.execution.ExecutionBundle;
@@ -8,6 +8,7 @@ import com.intellij.execution.RunnerAndConfigurationSettings;
 import com.intellij.execution.configurations.*;
 import com.intellij.execution.runners.ProgramRunner;
 import com.intellij.execution.target.*;
+import com.intellij.execution.ui.RunnerAndConfigurationSettingsEditor;
 import com.intellij.execution.ui.TargetAwareRunConfigurationEditor;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.DataManager;
@@ -18,6 +19,7 @@ import com.intellij.openapi.application.NonBlockingReadAction;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.ConfigurationException;
+import com.intellij.openapi.options.ConfigurationQuickFix;
 import com.intellij.openapi.options.SettingsEditor;
 import com.intellij.openapi.options.SettingsEditorListener;
 import com.intellij.openapi.project.DumbService;
@@ -27,10 +29,10 @@ import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.text.HtmlBuilder;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.DocumentAdapter;
+import com.intellij.ui.components.ActionLink;
 import com.intellij.ui.components.JBCheckBox;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBScrollPane;
-import com.intellij.ui.components.labels.LinkLabel;
 import com.intellij.ui.components.panels.NonOpaquePanel;
 import com.intellij.util.Alarm;
 import com.intellij.util.SingleAlarm;
@@ -109,8 +111,11 @@ public final class SingleConfigurationConfigurable<Config extends RunConfigurati
         requestToUpdateWarning();
       }
     });
+    
+    boolean inplaceValidationSupported = getEditor() instanceof RunnerAndConfigurationSettingsEditor &&
+                                         ((RunnerAndConfigurationSettingsEditor)getEditor()).isInplaceValidationSupported();
     myValidationAlarm = new SingleAlarm(() -> {
-      if (myComponent != null) {
+      if (myComponent != null && !inplaceValidationSupported) {
         validateResultOnBackgroundThread(configurationException -> myComponent.updateValidationResultVisibility(configurationException));
       }
     }, 100, getEditor(), Alarm.ThreadToUse.SWING_THREAD, ModalityState.current());
@@ -239,14 +244,15 @@ public final class SingleConfigurationConfigurable<Config extends RunConfigurati
 
   @Nullable
   private Runnable getQuickFix(RunnerAndConfigurationSettings snapshot, ConfigurationException exception) {
-    Runnable quickFix = exception.getQuickFix();
+    ConfigurationQuickFix quickFix = exception.getConfigurationQuickFix();
     if (quickFix != null && snapshot != null) {
       return () -> {
-        quickFix.run();
+        quickFix.applyFix(DataManager.getInstance().getDataContext(myComponent.myWholePanel));
         getEditor().resetFrom(snapshot);
       };
     }
-    return quickFix;
+    return quickFix == null ? null :
+           () -> quickFix.applyFix(DataManager.getInstance().getDataContext(myComponent.myWholePanel));
   }
 
   private static void checkConfiguration(@NotNull ProgramRunner<?> runner, @NotNull RunnerAndConfigurationSettings snapshot)
@@ -372,7 +378,7 @@ public final class SingleConfigurationConfigurable<Config extends RunConfigurati
     private JBScrollPane myJBScrollPane;
 
     private ComboBox myRunOnComboBox;
-    private JLabel myManageTargetsLabel;
+    private ActionLink myManageTargetsLabel;
     private JPanel myRunOnPanel;
     private JPanel myRunOnPanelInner;
 
@@ -530,7 +536,7 @@ public final class SingleConfigurationConfigurable<Config extends RunConfigurati
       myComponentPlace = new NonOpaquePanel();
       myRunOnComboBox = new RunOnTargetComboBox(myProject);
       myManageTargetsLabel =
-        LinkLabel.create(ExecutionBundle.message("edit.run.configuration.run.configuration.manage.targets.label"), () -> {
+        new ActionLink(ExecutionBundle.message("edit.run.configuration.run.configuration.manage.targets.label"), e -> {
           String selectedName = ((RunOnTargetComboBox)myRunOnComboBox).getSelectedTargetName();
           LanguageRuntimeType<?> languageRuntime = ((RunOnTargetComboBox)myRunOnComboBox).getDefaultLanguageRuntimeType();
           TargetEnvironmentsConfigurable configurable = new TargetEnvironmentsConfigurable(myProject, selectedName, languageRuntime);

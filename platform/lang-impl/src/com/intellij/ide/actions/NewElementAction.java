@@ -16,7 +16,7 @@ import org.jetbrains.annotations.Nullable;
 /**
  * @author Konstantin Bulenkov
  */
-public class NewElementAction extends DumbAwareAction implements PopupAction {
+public class NewElementAction extends DumbAwareAction implements PopupAction, UpdateInBackground {
 
   @Override
   public void actionPerformed(@NotNull AnActionEvent e) {
@@ -78,7 +78,7 @@ public class NewElementAction extends DumbAwareAction implements PopupAction {
       return;
     }
 
-    presentation.setEnabled(!ActionGroupUtil.isGroupEmpty(getGroup(e.getDataContext()), e, isEnabledInModalContext()));
+    presentation.setEnabled(!ActionGroupUtil.isGroupEmpty(getGroup(e.getDataContext()), e));
   }
 
   protected boolean isEnabled(@NotNull AnActionEvent e) {

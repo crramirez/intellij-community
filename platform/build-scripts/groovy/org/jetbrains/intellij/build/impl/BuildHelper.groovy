@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.intellij.build.impl
 
 import com.intellij.util.lang.UrlClassLoader
@@ -15,6 +15,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.nio.file.StandardCopyOption
+import java.util.concurrent.TimeUnit
 
 @CompileStatic
 final class BuildHelper {
@@ -41,6 +42,7 @@ final class BuildHelper {
     Class<?> logger = System.Logger.class as Class<?>
     Class<?> path = Path.class as Class<?>
     Class<?> bool = boolean.class as Class<?>
+    Class<?> long_ = long.class as Class<?>
 
     copyDirHandle = lookup.findStatic(helperClassLoader.loadClass("org.jetbrains.intellij.build.io.FileKt"),
                                       "copyDir",
@@ -57,7 +59,7 @@ final class BuildHelper {
     Class<?> string = String.class as Class<?>
     runJavaHandle = lookup.findStatic(helperClassLoader.loadClass("org.jetbrains.intellij.build.io.ProcessKt"),
                                       "runJava", MethodType.methodType(voidClass, string, iterable, iterable, iterable,
-                                                                       logger))
+                                                                       logger, long_))
     runProcessHandle = lookup.findStatic(helperClassLoader.loadClass("org.jetbrains.intellij.build.io.ProcessKt"),
                                          "runProcess", MethodType.methodType(voidClass, List.class as Class<?>, path, logger))
 
@@ -68,7 +70,7 @@ final class BuildHelper {
 
     reorderJars = lookup.findStatic(helperClassLoader.loadClass("org.jetbrains.intellij.build.tasks.ReorderJarsKt"),
                                                      "reorderJars",
-                                                     MethodType.methodType(path,
+                                                     MethodType.methodType(voidClass,
                                                                            path, path, iterable, path,
                                                                            string, path,
                                                                            logger))
@@ -119,8 +121,9 @@ final class BuildHelper {
                       String mainClass,
                       Iterable<String> args,
                       Iterable<String> jvmArgs,
-                      Iterable<String> classPath) {
-    getInstance(buildContext).runJavaHandle.invokeWithArguments(mainClass, args, jvmArgs, classPath, buildContext.messages)
+                      Iterable<String> classPath,
+                      long timeoutMillis = TimeUnit.MINUTES.toMillis(10L)) {
+    getInstance(buildContext).runJavaHandle.invokeWithArguments(mainClass, args, jvmArgs, classPath, buildContext.messages, timeoutMillis)
   }
 
   static void runProcess(BuildContext buildContext, List<String> args) {

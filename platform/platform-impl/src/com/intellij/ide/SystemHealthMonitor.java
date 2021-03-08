@@ -1,14 +1,12 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ide;
 
 import com.intellij.diagnostic.VMOptions;
 import com.intellij.execution.ExecutionException;
 import com.intellij.execution.configurations.GeneralCommandLine;
-import com.intellij.execution.process.ProcessOutput;
+import com.intellij.execution.process.CapturingProcessHandler;
 import com.intellij.execution.process.UnixProcessManager;
-import com.intellij.execution.util.ExecUtil;
 import com.intellij.ide.actions.EditCustomVmOptionsAction;
-import com.intellij.ide.plugins.PluginManagerCore;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.jna.JnaLoader;
 import com.intellij.notification.*;
@@ -21,6 +19,7 @@ import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.SystemInfo;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.util.text.Strings;
 import com.intellij.util.MathUtil;
 import com.intellij.util.SystemProperties;
@@ -32,13 +31,13 @@ import com.sun.jna.*;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.PropertyKey;
+import org.jetbrains.jps.model.java.JdkVersionDetector;
 
 import javax.swing.*;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.List;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -48,18 +47,32 @@ import java.util.stream.Stream;
 
 final class SystemHealthMonitor extends PreloadingActivity {
   private static final Logger LOG = Logger.getInstance(SystemHealthMonitor.class);
-
   private static final String DISPLAY_ID = "System Health";
-  private static final int MIN_RESERVED_CODE_CACHE_SIZE = PluginManagerCore.isRunningFromSources() ? 240 : CpuArch.is32Bit() ? 384 : 512;
 
   @Override
   public void preload(@NotNull ProgressIndicator indicator) {
+    checkInstallationIntegrity();
     checkIdeDirectories();
     checkRuntime();
     checkReservedCodeCacheSize();
     checkEnvironment();
     checkSignalBlocking();
     startDiskSpaceMonitoring();
+  }
+
+  private static void checkInstallationIntegrity() {
+    if (SystemInfo.isUnix && !SystemInfo.isMac) {
+      try (Stream<Path> stream = Files.list(Path.of(PathManager.getLibPath()))) {
+        // see `LinuxDistributionBuilder#generateVersionMarker`
+        long markers = stream.filter(p -> p.getFileName().toString().startsWith("build-marker-")).count();
+        if (markers > 1) {
+          showNotification("mixed.bag.installation", false, null, ApplicationNamesInfo.getInstance().getFullProductName());
+        }
+      }
+      catch (IOException e) {
+        LOG.warn(e.getClass().getName() + ": " + e.getMessage());
+      }
+    }
   }
 
   private static void checkIdeDirectories() {
@@ -74,7 +87,7 @@ final class SystemHealthMonitor extends PreloadingActivity {
   }
 
   private static String shorten(String pathStr) {
-    Path path = Paths.get(pathStr).toAbsolutePath(), userHome = Paths.get(SystemProperties.getUserHome());
+    Path path = Path.of(pathStr).toAbsolutePath(), userHome = Path.of(SystemProperties.getUserHome());
     if (path.startsWith(userHome)) {
       Path relative = userHome.relativize(path);
       return SystemInfo.isWindows ? "%USERPROFILE%\\" + relative : "~/" + relative;
@@ -85,13 +98,16 @@ final class SystemHealthMonitor extends PreloadingActivity {
   }
 
   private static void checkRuntime() {
-    if (!(SystemInfo.isJetBrainsJvm || PathManager.isUnderHomeDirectory(SystemProperties.getJavaHome()))) {
+    String jreHome = SystemProperties.getJavaHome();
+    if (!(PathManager.isUnderHomeDirectory(jreHome) || isModernJBR())) {
+      // the JRE is non-bundled and is either non-JB or older than bundled
       NotificationAction switchAction = null;
 
-      if ((SystemInfo.isWindows || SystemInfo.isMac || SystemInfo.isLinux) && isJbrOperational()) {
-        String appName = ApplicationNamesInfo.getInstance().getScriptName();
-        String configName = appName + (!SystemInfo.isWindows ? "" : CpuArch.isIntel64() ? "64.exe" : ".exe") + ".jdk";
-        Path configFile = Paths.get(PathManager.getConfigPath(), configName);
+      String directory = PathManager.getCustomOptionsDirectory();
+      if (directory != null && (SystemInfo.isWindows || SystemInfo.isMac || SystemInfo.isLinux) && isJbrOperational()) {
+        String scriptName = ApplicationNamesInfo.getInstance().getScriptName();
+        String configName = scriptName + (!SystemInfo.isWindows ? "" : CpuArch.isIntel64() ? "64.exe" : ".exe") + ".jdk";
+        Path configFile = Path.of(directory, configName);
         if (Files.isRegularFile(configFile)) {
           switchAction = new NotificationAction(IdeBundle.message("action.SwitchToJBR.text")) {
             @Override
@@ -109,17 +125,25 @@ final class SystemHealthMonitor extends PreloadingActivity {
         }
       }
 
-      String current = JavaVersion.current() + " by " + SystemInfo.JAVA_VENDOR;
-      showNotification("bundled.jre.version.message", switchAction, current);
+      jreHome = StringUtil.trimEnd(jreHome, "/Contents/Home");
+      showNotification("bundled.jre.version.message", switchAction, JavaVersion.current(), SystemInfo.JAVA_VENDOR, jreHome);
     }
   }
 
+  private static boolean isModernJBR() {
+    if (!SystemInfo.isJetBrainsJvm) {
+      return false;
+    }
+    // when can't detect a JBR version, give a user the benefit of the doubt
+    JdkVersionDetector.JdkVersionInfo jbrVersion = JdkVersionDetector.getInstance().detectJdkVersionInfo(PathManager.getBundledRuntimePath());
+    return jbrVersion == null || JavaVersion.current().compareTo(jbrVersion.version) >= 0;
+  }
+
   private static boolean isJbrOperational() {
-    Path bin = Path.of(PathManager.getBundledRuntimePath(), SystemInfo.isWindows ? "bin/java.exe" : SystemInfo.isMac ? "Contents/Home/bin/java" : "bin/java");
+    Path bin = Path.of(PathManager.getBundledRuntimePath(), SystemInfo.isWindows ? "bin/java.exe": "bin/java");
     if (Files.isRegularFile(bin) && (SystemInfo.isWindows || Files.isExecutable(bin))) {
       try {
-        ProcessOutput output = ExecUtil.execAndGetOutput(new GeneralCommandLine(bin.toString(), "-version"));
-        return output.getExitCode() == 0;
+        return new CapturingProcessHandler(new GeneralCommandLine(bin.toString(), "-version")).runProcess(30_000).getExitCode() == 0;
       }
       catch (ExecutionException e) {
         LOG.debug(e);
@@ -131,7 +155,8 @@ final class SystemHealthMonitor extends PreloadingActivity {
 
   private static void checkReservedCodeCacheSize() {
     int reservedCodeCacheSize = VMOptions.readOption(VMOptions.MemoryKind.CODE_CACHE, true);
-    if (reservedCodeCacheSize > 0 && reservedCodeCacheSize < MIN_RESERVED_CODE_CACHE_SIZE) {
+    int minReservedCodeCacheSize = 240;  //todo[r.sh] PluginManagerCore.isRunningFromSources() ? 240 : CpuArch.is32Bit() ? 384 : 512;
+    if (reservedCodeCacheSize > 0 && reservedCodeCacheSize < minReservedCodeCacheSize) {
       EditCustomVmOptionsAction vmEditAction = new EditCustomVmOptionsAction();
       NotificationAction action = new NotificationAction(IdeBundle.message("vm.options.edit.action.cap")) {
         @Override
@@ -140,7 +165,7 @@ final class SystemHealthMonitor extends PreloadingActivity {
           ActionUtil.performActionDumbAware(vmEditAction, e);
         }
       };
-      showNotification("code.cache.warn.message", vmEditAction.isEnabled() ? action : null, reservedCodeCacheSize, MIN_RESERVED_CODE_CACHE_SIZE);
+      showNotification("code.cache.warn.message", vmEditAction.isEnabled() ? action : null, reservedCodeCacheSize, minReservedCodeCacheSize);
     }
   }
 
@@ -172,21 +197,32 @@ final class SystemHealthMonitor extends PreloadingActivity {
   private static void showNotification(@PropertyKey(resourceBundle = "messages.IdeBundle") String key,
                                        @Nullable NotificationAction action,
                                        Object... params) {
-    boolean ignored = PropertiesComponent.getInstance().isValueSet("ignore." + key);
-    LOG.warn("issue detected: " + key + (ignored ? " (ignored)" : ""));
-    if (ignored) return;
+    showNotification(key, true, action, params);
+  }
+
+  private static void showNotification(@PropertyKey(resourceBundle = "messages.IdeBundle") String key,
+                                       boolean suppressable,
+                                       @Nullable NotificationAction action,
+                                       Object... params) {
+    if (suppressable) {
+      boolean ignored = PropertiesComponent.getInstance().isValueSet("ignore." + key);
+      LOG.warn("issue detected: " + key + (ignored ? " (ignored)" : ""));
+      if (ignored) return;
+    }
 
     Notification notification = new MyNotification(IdeBundle.message(key, params));
     if (action != null) {
       notification.addAction(action);
     }
-    notification.addAction(new NotificationAction(IdeBundle.message("sys.health.acknowledge.action")) {
-      @Override
-      public void actionPerformed(@NotNull AnActionEvent e, @NotNull Notification notification) {
-        notification.expire();
-        PropertiesComponent.getInstance().setValue("ignore." + key, "true");
-      }
-    });
+    if (suppressable) {
+      notification.addAction(new NotificationAction(IdeBundle.message("sys.health.acknowledge.action")) {
+        @Override
+        public void actionPerformed(@NotNull AnActionEvent e, @NotNull Notification notification) {
+          notification.expire();
+          PropertiesComponent.getInstance().setValue("ignore." + key, "true");
+        }
+      });
+    }
     notification.setImportant(true);
 
     Notifications.Bus.notify(notification);

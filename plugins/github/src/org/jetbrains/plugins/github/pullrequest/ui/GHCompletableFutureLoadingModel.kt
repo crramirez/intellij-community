@@ -9,15 +9,8 @@ import org.jetbrains.plugins.github.util.handleOnEdt
 import java.util.concurrent.CompletableFuture
 import kotlin.properties.Delegates.observable
 
-open class GHCompletableFutureLoadingModel<T>(parentDisposable: Disposable)
+class GHCompletableFutureLoadingModel<T>(parentDisposable: Disposable)
   : GHSimpleLoadingModel<T>(), Disposable {
-
-  final override var loading: Boolean = false
-
-  final override var result: T? = null
-  final override var resultAvailable: Boolean = false
-    private set
-  final override var error: Throwable? = null
 
   //to cancel old callbacks
   private var updateFuture by observable<CompletableFuture<Unit>?>(null) { _, oldValue, _ ->
@@ -36,6 +29,7 @@ open class GHCompletableFutureLoadingModel<T>(parentDisposable: Disposable)
   }
 
   private fun load(future: CompletableFuture<T>) {
+    error = null
     loading = true
     eventDispatcher.multicaster.onLoadingStarted()
     updateFuture = future.handleOnEdt(this) { result, error ->

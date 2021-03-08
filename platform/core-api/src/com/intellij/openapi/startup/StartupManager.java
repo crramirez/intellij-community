@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.startup;
 
 import com.intellij.openapi.project.DumbAware;
@@ -26,6 +26,7 @@ public abstract class StartupManager {
    * @deprecated Use {@link #registerStartupActivity(Runnable)} instead
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public void registerPreStartupActivity(@NotNull Runnable runnable) {
     registerStartupActivity(runnable);
   }
@@ -33,8 +34,6 @@ public abstract class StartupManager {
   /**
    * Registers an activity that is performed during project load while the "Loading Project"
    * progress bar is displayed. You may NOT access the PSI structures from the activity.
-   *
-   * @see StartupActivity#STARTUP_ACTIVITY
    */
   @ApiStatus.Internal
   public abstract void registerStartupActivity(@NotNull Runnable runnable);
@@ -54,7 +53,7 @@ public abstract class StartupManager {
    * Registers activity that is executed on pooled thread after project is opened.
    * The runnable will be executed in current thread if project is already opened.</p>
    * <p>
-   * See https://github.com/JetBrains/intellij-community/blob/master/platform/service-container/overview.md#startup-activity.
+   * See <a href="https://github.com/JetBrains/intellij-community/blob/master/platform/service-container/overview.md#startup-activity">docs</a> for details.
    *
    * @see StartupActivity#POST_STARTUP_ACTIVITY
    */

@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.workspaceModel.ide
 
 import com.intellij.openapi.project.Project
@@ -45,7 +45,7 @@ sealed class JpsFileEntitySource : EntitySource {
    * Represents a specific xml file containing configuration of some entities of IntelliJ IDEA project.
    */
   data class ExactFile(val file: VirtualFileUrl, override val projectLocation: JpsProjectConfigLocation) : JpsFileEntitySource() {
-    override val virtualFileUrl: VirtualFileUrl?
+    override val virtualFileUrl: VirtualFileUrl
       get() = file
   }
 
@@ -64,7 +64,7 @@ sealed class JpsFileEntitySource : EntitySource {
       private val nextId = AtomicInteger()
     }
 
-    override val virtualFileUrl: VirtualFileUrl?
+    override val virtualFileUrl: VirtualFileUrl
       get() = directory
 
     override fun equals(other: Any?): Boolean {
@@ -122,17 +122,18 @@ interface CustomModuleEntitySource : EntitySource {
 /**
  * Returns `null` for the default project
  */
-val Project.configLocation: JpsProjectConfigLocation?
-  get() = if (isDirectoryBased) {
-    basePath?.let {
-      val virtualFileUrlManager = VirtualFileUrlManager.getInstance(this)
+fun getJpsProjectConfigLocation(project: Project): JpsProjectConfigLocation? {
+  return if (project.isDirectoryBased) {
+    project.basePath?.let {
+      val virtualFileUrlManager = VirtualFileUrlManager.getInstance(project)
       JpsProjectConfigLocation.DirectoryBased(virtualFileUrlManager.fromPath(it))
     }
   }
   else {
-    projectFilePath?.let {
-      val virtualFileUrlManager = VirtualFileUrlManager.getInstance(this)
+    project.projectFilePath?.let {
+      val virtualFileUrlManager = VirtualFileUrlManager.getInstance(project)
       val iprFile = virtualFileUrlManager.fromPath(it)
       JpsProjectConfigLocation.FileBased(iprFile, virtualFileUrlManager.getParentVirtualUrl(iprFile)!!)
     }
   }
+}

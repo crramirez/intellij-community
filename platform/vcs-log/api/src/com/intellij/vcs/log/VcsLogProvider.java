@@ -11,6 +11,7 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.CollectConsumer;
 import com.intellij.util.Consumer;
 import com.intellij.util.messages.MessageBus;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -59,10 +60,8 @@ public interface VcsLogProvider {
    * <p/>
    * Reports commits to the consumer to avoid creation & even temporary storage of a too large commits collection.
    */
-  default void readFullDetails(@NotNull VirtualFile root, @NotNull List<String> hashes,
-                               @NotNull Consumer<? super VcsFullCommitDetails> commitConsumer) throws VcsException {
-    readFullDetails(root, hashes, commitConsumer, false);
-  }
+  void readFullDetails(@NotNull VirtualFile root, @NotNull List<String> hashes,
+                       @NotNull Consumer<? super VcsFullCommitDetails> commitConsumer) throws VcsException;
 
   /**
    * <p>Returns the VCS which is supported by this provider.</p>
@@ -204,6 +203,7 @@ public interface VcsLogProvider {
    */
   @NotNull
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   default List<? extends VcsShortCommitDetails> readShortDetails(@NotNull VirtualFile root, @NotNull List<String> hashes)
     throws VcsException {
     CollectConsumer<VcsShortCommitDetails> collectConsumer = new CollectConsumer<>();
@@ -214,21 +214,9 @@ public interface VcsLogProvider {
   /**
    * @deprecated replaced by {@link VcsLogProvider#readFullDetails(VirtualFile, List, Consumer)}.
    */
-  @SuppressWarnings("DeprecatedIsStillUsed")
-  @Deprecated
-  default void readFullDetails(@NotNull VirtualFile root,
-                               @NotNull List<String> hashes,
-                               @NotNull Consumer<? super VcsFullCommitDetails> commitConsumer,
-                               boolean isForIndexing)
-    throws VcsException {
-    throw new UnsupportedOperationException(this.getClass().getName() + ".readFullDetails is deprecated");
-  }
-
-  /**
-   * @deprecated replaced by {@link VcsLogProvider#readFullDetails(VirtualFile, List, Consumer)}.
-   */
   @NotNull
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   default List<? extends VcsFullCommitDetails> readFullDetails(@NotNull VirtualFile root, @NotNull List<String> hashes)
     throws VcsException {
     List<VcsFullCommitDetails> result = new ArrayList<>();

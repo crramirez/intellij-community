@@ -8,11 +8,9 @@ import com.intellij.openapi.actionSystem.ActionGroup;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.ui.JBPopupMenu;
+import com.intellij.ui.DoubleClickListener;
 import com.intellij.ui.TreeUIHelper;
-import com.intellij.util.ui.EmptyIcon;
-import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.tree.TreeUtil;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -42,16 +40,19 @@ public class SimpleTree extends Tree implements CellEditorListener {
 
   private int myMinHeightInRows = 5;
 
-  private Icon myExpandedHandle;
-  private Icon myCollapsedHandle;
-  private Icon myEmptyHandle;
-
   public SimpleTree() {
     setModel(new DefaultTreeModel(new PatchedDefaultMutableTreeNode()));
     TreeUtil.installActions(this);
 
     configureUiHelper(TreeUIHelper.getInstance());
 
+    new DoubleClickListener() {
+      @Override
+      protected boolean onDoubleClick(@NotNull MouseEvent e) {
+        handleDoubleClickOrEnter(getClosestPathForLocation(e.getX(), e.getY()), e);
+        return true;
+      }
+    }.installOn(this);
     addMouseListener(new MyMouseListener());
     setCellRenderer(new NodeRenderer());
 
@@ -390,11 +391,6 @@ public class SimpleTree extends Tree implements CellEditorListener {
     ApplicationManager.getApplication().invokeLater(runnable, ModalityState.stateForComponent(this));
   }
 
-  // TODO: move to some util?
-  public static boolean isDoubleClick(MouseEvent e) {
-    return e != null && e.getClickCount() > 0 && e.getClickCount() % 2 == 0;
-  }
-
   protected ActionGroup getPopupGroup() {
     return myPopupGroup;
   }
@@ -406,18 +402,7 @@ public class SimpleTree extends Tree implements CellEditorListener {
   private class MyMouseListener extends MouseAdapter {
     @Override
     public void mousePressed(MouseEvent e) {
-      if (e.isPopupTrigger()) {
-        invokePopup(e);
-      }
-      else if (isDoubleClick(e)) {
-        handleDoubleClickOrEnter(getClosestPathForLocation(e.getX(), e.getY()), e);
-        /*
-        if (!TreeWizardPopupImpl.isLocationInExpandControl(SimpleTree.this, getSelectionPath(), e.getX(), e.getY())) {
-          TreePath treePath = getClosestPathForLocation(e.getX(), e.getY());
-          handleDoubleClickOrEnter(treePath, e);
-        }
-        */
-      }
+      invokePopup(e);
     }
 
     @Override
@@ -533,58 +518,5 @@ public class SimpleTree extends Tree implements CellEditorListener {
   @Override
   public void updateUI() {
     super.updateUI();
-
-    myExpandedHandle = null;
-    myCollapsedHandle = null;
-    myEmptyHandle = null;
   }
-
-  /**
-   * @deprecated old way to configure tree icons
-   */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2020.3")
-  public Icon getHandleIcon(DefaultMutableTreeNode node, TreePath path) {
-    if (node.getChildCount() == 0) return getEmptyHandle();
-    return isExpanded(path) ? getExpandedHandle() : getCollapsedHandle();
-
-  }
-
-  /**
-   * @deprecated use {@link UIUtil#getTreeExpandedIcon} instead
-   */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2020.3")
-  public Icon getExpandedHandle() {
-    if (myExpandedHandle == null) {
-      myExpandedHandle = UIUtil.getTreeExpandedIcon();
-    }
-    return myExpandedHandle;
-  }
-
-  /**
-   * @deprecated use {@link UIUtil#getTreeCollapsedIcon} instead
-   */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2020.3")
-  public Icon getCollapsedHandle() {
-    if (myCollapsedHandle == null) {
-      myCollapsedHandle = UIUtil.getTreeCollapsedIcon();
-    }
-    return myCollapsedHandle;
-  }
-
-  /**
-   * @deprecated use {@link EmptyIcon#create} instead
-   */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2020.3")
-  public Icon getEmptyHandle() {
-    if (myEmptyHandle == null) {
-      final Icon expand = getExpandedHandle();
-      myEmptyHandle = expand != null ? EmptyIcon.create(expand) : EmptyIcon.create(0);
-    }
-    return myEmptyHandle;
-  }
-
 }

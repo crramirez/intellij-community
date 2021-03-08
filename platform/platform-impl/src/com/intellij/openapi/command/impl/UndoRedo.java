@@ -51,7 +51,7 @@ abstract class UndoRedo {
     return getStackHolder().canBeUndoneOrRedone(getDecRefs());
   }
 
-  private Set<DocumentReference> getDecRefs() {
+  private Collection<DocumentReference> getDecRefs() {
     return myEditor == null ? Collections.emptySet() : UndoManagerImpl.getDocumentReferences(myEditor);
   }
 
@@ -170,8 +170,7 @@ abstract class UndoRedo {
 
   private void reportCannotUndo(@NlsContexts.DialogMessage String message, Collection<? extends DocumentReference> problemFiles) {
     if (ApplicationManager.getApplication().isUnitTestMode()) {
-      throw new RuntimeException(
-        message + "\n" + StringUtil.join(problemFiles, StringUtil.createToStringFunction(DocumentReference.class), "\n"));
+      throw new RuntimeException(message + "\n" + StringUtil.join(problemFiles, "\n"));
     }
     new CannotUndoReportDialog(myManager.getProject(), message, problemFiles).show();
   }

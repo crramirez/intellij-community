@@ -3,6 +3,7 @@ package com.intellij.ide.util.projectWizard;
 
 import com.intellij.ide.RecentProjectsManager;
 import com.intellij.ide.impl.OpenProjectTask;
+import com.intellij.ide.impl.TrustedProjects;
 import com.intellij.ide.util.projectWizard.actions.ProjectSpecificAction;
 import com.intellij.idea.ActionsBundle;
 import com.intellij.internal.statistic.eventLog.FeatureUsageData;
@@ -173,7 +174,14 @@ public abstract class AbstractNewProjectStep<T> extends DefaultActionGroup imple
       Project projectToClose = frame != null ? frame.getProject() : null;
       DirectoryProjectGenerator<T> generator = settings.getProjectGenerator();
       T actualSettings = projectGeneratorPeer.getSettings();
-      doGenerateProject(projectToClose, settings.getProjectLocation(), generator, actualSettings);
+      Project project = doGenerateProject(projectToClose, settings.getProjectLocation(), generator, actualSettings);
+      if (project != null && shouldTrustCreatedProject()) {
+        TrustedProjects.setTrusted(project, true);
+      }
+    }
+
+    public boolean shouldTrustCreatedProject() {
+      return false;
     }
   }
 
@@ -221,18 +229,18 @@ public abstract class AbstractNewProjectStep<T> extends DefaultActionGroup imple
     if (project != null && generator != null) {
       generator.generateProject(project, baseDir, settings, ModuleManager.getInstance(project).getModules()[0]);
     }
-    logProjectGeneratedEvent(generator);
+    logProjectGeneratedEvent(generator, project);
 
     return project;
   }
 
-  private static void logProjectGeneratedEvent(@Nullable DirectoryProjectGenerator<?> generator) {
+  private static void logProjectGeneratedEvent(@Nullable DirectoryProjectGenerator<?> generator, @Nullable Project project) {
     FeatureUsageData data = new FeatureUsageData();
     if (generator != null) {
       data.addData("generator_id", generator.getClass().getName());
       data.addPluginInfo(PluginInfoDetectorKt.getPluginInfo(generator.getClass()));
     }
 
-    FUCounterUsageLogger.getInstance().logEvent("new.project.wizard", "project.generated", data);
+    FUCounterUsageLogger.getInstance().logEvent(project, "new.project.wizard", "project.generated", data);
   }
 }

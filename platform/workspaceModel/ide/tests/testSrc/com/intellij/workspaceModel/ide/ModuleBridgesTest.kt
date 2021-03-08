@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.workspaceModel.ide
 
 import com.intellij.ProjectTopics.PROJECT_ROOTS
@@ -16,8 +16,6 @@ import com.intellij.openapi.roots.impl.OrderEntryUtil
 import com.intellij.openapi.roots.libraries.LibraryTablesRegistrar
 import com.intellij.openapi.util.JDOMUtil
 import com.intellij.openapi.util.io.FileUtil
-import com.intellij.openapi.util.io.IoTestUtil
-import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.vfs.VfsUtilCore
 import com.intellij.testFramework.*
 import com.intellij.testFramework.UsefulTestCase.assertEmpty
@@ -244,7 +242,7 @@ class ModuleBridgesTest {
       val projectModel = WorkspaceModel.getInstance(project)
 
       projectModel.updateProjectModel {
-        it.addModuleEntity("name", emptyList(), JpsFileEntitySource.FileInDirectory(moduleDirUrl, project.configLocation!!))
+        it.addModuleEntity("name", emptyList(), JpsFileEntitySource.FileInDirectory(moduleDirUrl, getJpsProjectConfigLocation(project)!!))
       }
 
       assertNotNull(moduleManager.findModuleByName("name"))
@@ -252,7 +250,7 @@ class ModuleBridgesTest {
       projectModel.updateProjectModel {
         val moduleEntity = it.entities(ModuleEntity::class.java).single()
         it.removeEntity(moduleEntity)
-        it.addModuleEntity("name", emptyList(), JpsFileEntitySource.FileInDirectory(moduleDirUrl, project.configLocation!!))
+        it.addModuleEntity("name", emptyList(), JpsFileEntitySource.FileInDirectory(moduleDirUrl, getJpsProjectConfigLocation(project)!!))
       }
 
       assertEquals(1, moduleManager.modules.size)
@@ -324,7 +322,7 @@ class ModuleBridgesTest {
       val moduleDirUrl = virtualFileManager.fromPath(project.basePath!!)
       val projectModel = WorkspaceModel.getInstance(project)
 
-      val projectLocation = project.configLocation!!
+      val projectLocation = getJpsProjectConfigLocation(project)!!
       val virtualFileUrl = dir.toVirtualFileUrl(virtualFileManager)
       projectModel.updateProjectModel {
         val moduleEntity = it.addModuleEntity("name", emptyList(), JpsFileEntitySource.FileInDirectory(moduleDirUrl, projectLocation))
@@ -473,7 +471,7 @@ class ModuleBridgesTest {
       tableId = LibraryTableId.ProjectLibraryTableId,
       roots = listOf(LibraryRoot(jarUrl, LibraryRootTypeId.COMPILED)),
       excludedRoots = emptyList(),
-      source = JpsProjectEntitiesLoader.createJpsEntitySourceForProjectLibrary(toConfigLocation(iprFile, virtualFileManager), virtualFileManager)
+      source = JpsProjectEntitiesLoader.createJpsEntitySourceForProjectLibrary(toConfigLocation(iprFile, virtualFileManager))
     )
 
     WorkspaceModelInitialTestContent.withInitialContent(builder.toStorage()) {
@@ -669,34 +667,6 @@ class ModuleBridgesTest {
 
     assertEmpty(entityStore.current.entities(ContentRootEntity::class.java).toList())
     assertEmpty(entityStore.current.entities(SourceRootEntity::class.java).toList())
-  }
-
-  @Test
-  fun `test content root equality at case insensitive FS`() {
-    IoTestUtil.assumeCaseInsensitiveFS()
-    WriteCommandAction.runWriteCommandAction(project) {
-      val moduleName = "build"
-      val contentRoot = "test"
-      val tempDir = temporaryDirectoryRule.newPath().toFile()
-      val contentRootFolder = File(tempDir, StringUtil.capitalize(contentRoot))
-
-      val moduleFile = File(project.basePath, "$moduleName.iml")
-      val module = ModuleManager.getInstance(project).modifiableModel.let { moduleModel ->
-        val module = moduleModel.newModule(moduleFile.path, EmptyModuleType.getInstance().id) as ModuleBridge
-        moduleModel.commit()
-        module
-      }
-
-      ModuleRootModificationUtil.updateModel(module) { model ->
-        FileUtil.createDirectory(contentRootFolder)
-        val url = VfsUtilCore.pathToUrl(FileUtil.toSystemIndependentName(File(tempDir, contentRoot).path))
-        model.addContentEntry(url)
-      }
-
-      val rootManager = ModuleRootManager.getInstance(module)
-      assertEquals(1, rootManager.contentRootUrls.size)
-      assertEquals(VfsUtilCore.pathToUrl(FileUtil.toSystemIndependentName(contentRootFolder.path)), rootManager.contentRootUrls[0])
-    }
   }
 
   @Test

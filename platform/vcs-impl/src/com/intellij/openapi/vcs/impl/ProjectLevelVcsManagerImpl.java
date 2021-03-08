@@ -49,17 +49,13 @@ import com.intellij.util.ContentUtilEx;
 import com.intellij.util.Processor;
 import com.intellij.util.concurrency.annotations.RequiresEdt;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.messages.MessageBusConnection;
 import com.intellij.util.text.DateFormatUtil;
 import com.intellij.vcs.ViewUpdateInfoNotification;
 import com.intellij.vcs.console.VcsConsoleView;
 import org.jdom.Attribute;
 import org.jdom.DataConversionException;
 import org.jdom.Element;
-import org.jetbrains.annotations.NonNls;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.TestOnly;
+import org.jetbrains.annotations.*;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -87,7 +83,7 @@ public final class ProjectLevelVcsManagerImpl extends ProjectLevelVcsManagerEx i
 
   private final @NotNull AtomicInteger myBackgroundOperationCounter = new AtomicInteger();
 
-  private final Set<ActionKey> myBackgroundRunningTasks = new HashSet<>();
+  private final Set<ActionKey> myBackgroundRunningTasks = ContainerUtil.newConcurrentSet();
 
   private final List<VcsConsoleLine> myPendingOutput = new ArrayList<>();
 
@@ -391,14 +387,6 @@ public final class ProjectLevelVcsManagerImpl extends ProjectLevelVcsManagerEx i
     myMappings.setMapping(FileUtil.toSystemIndependentName(path), activeVcsName);
   }
 
-  /**
-   * @deprecated use {@link #setAutoDirectoryMappings(List)}
-   */
-  @Deprecated
-  public void setAutoDirectoryMapping(@NotNull String path, @Nullable String activeVcsName) {
-    setAutoDirectoryMappings(ContainerUtil.append(myMappings.getDirectoryMappings(), new VcsDirectoryMapping(path, activeVcsName)));
-  }
-
   public void setAutoDirectoryMappings(@NotNull List<? extends VcsDirectoryMapping> mappings) {
     myMappings.setDirectoryMappings(mappings);
     myMappings.cleanupMappings();
@@ -482,23 +470,6 @@ public final class ProjectLevelVcsManagerImpl extends ProjectLevelVcsManagerEx i
     return myOptionsAndConfirmations.getConfirmation(option);
   }
 
-  private final Map<VcsListener, MessageBusConnection> myAdapters = new HashMap<>();
-
-  @Override
-  public void addVcsListener(VcsListener listener) {
-    MessageBusConnection connection = myProject.getMessageBus().connect();
-    connection.subscribe(VCS_CONFIGURATION_CHANGED, listener);
-    myAdapters.put(listener, connection);
-  }
-
-  @Override
-  public void removeVcsListener(VcsListener listener) {
-    final MessageBusConnection connection = myAdapters.remove(listener);
-    if (connection != null) {
-      connection.disconnect();
-    }
-  }
-
   @Override
   public void startBackgroundVcsOperation() {
     myBackgroundOperationCounter.incrementAndGet();
@@ -558,7 +529,7 @@ public final class ProjectLevelVcsManagerImpl extends ProjectLevelVcsManagerEx i
   @Override
   public String getConsolidatedVcsName() {
     AbstractVcs singleVcs = getSingleVCS();
-    return singleVcs != null ? singleVcs.getShortName() : VcsBundle.message("vcs.generic.name");
+    return singleVcs != null ? singleVcs.getShortNameWithMnemonic() : VcsBundle.message("vcs.generic.name.with.mnemonic");
   }
 
   @Override
@@ -710,14 +681,14 @@ public final class ProjectLevelVcsManagerImpl extends ProjectLevelVcsManagerEx i
    * @deprecated use {@link BackgroundableActionLock}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public BackgroundableActionEnabledHandler getBackgroundableActionHandler(final VcsBackgroundableActions action) {
     ApplicationManager.getApplication().assertIsDispatchThread();
     return new BackgroundableActionEnabledHandler(myProject, action);
   }
 
-  @RequiresEdt
+  @CalledInAny
   boolean isBackgroundTaskRunning(Object @NotNull ... keys) {
-    ApplicationManager.getApplication().assertIsDispatchThread();
     return myBackgroundRunningTasks.contains(new ActionKey(keys));
   }
 

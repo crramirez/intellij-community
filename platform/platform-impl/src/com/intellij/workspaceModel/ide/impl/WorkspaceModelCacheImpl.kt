@@ -18,11 +18,9 @@ import com.intellij.util.io.exists
 import com.intellij.util.io.inputStream
 import com.intellij.util.io.lastModified
 import com.intellij.util.pooledThreadSingleAlarm
-import com.intellij.workspaceModel.ide.WorkspaceModel
-import com.intellij.workspaceModel.ide.WorkspaceModelChangeListener
-import com.intellij.workspaceModel.ide.WorkspaceModelTopics
-import com.intellij.workspaceModel.ide.getInstance
+import com.intellij.workspaceModel.ide.*
 import com.intellij.workspaceModel.storage.*
+import com.intellij.workspaceModel.storage.bridgeEntities.ModuleEntity
 import com.intellij.workspaceModel.storage.impl.EntityStorageSerializerImpl
 import com.intellij.workspaceModel.storage.impl.isConsistent
 import com.intellij.workspaceModel.storage.url.VirtualFileUrlManager
@@ -36,7 +34,7 @@ import java.nio.file.StandardCopyOption
 import java.util.concurrent.atomic.AtomicBoolean
 
 @ApiStatus.Internal
-class WorkspaceModelCacheImpl(private val project: Project, parentDisposable: Disposable) : Disposable {
+class WorkspaceModelCacheImpl(private val project: Project, parentDisposable: Disposable) : Disposable, WorkspaceModelCache {
   private val cacheFile: Path
   private val invalidateProjectCacheMarkerFile: File
   private val virtualFileManager: VirtualFileUrlManager = VirtualFileUrlManager.getInstance(project)
@@ -70,18 +68,37 @@ class WorkspaceModelCacheImpl(private val project: Project, parentDisposable: Di
     return project.getProjectDataPath(DATA_DIR_NAME).resolve("cache.data")
   }
 
-  private val saveAlarm = pooledThreadSingleAlarm(1000, this) {
+  private val saveAlarm = pooledThreadSingleAlarm(1000, this, this::doCacheSaving)
+
+  override fun saveCacheNow() {
+    saveAlarm.cancel()
+    doCacheSaving()
+  }
+
+  private fun doCacheSaving() {
     val storage = WorkspaceModel.getInstance(project).entityStorage.current
     if (!storage.isConsistent) invalidateProjectCache()
 
     if (!cachesInvalidated.get()) {
       LOG.debug("Saving project model cache to $cacheFile")
-      saveCache(storage)
+      val processedStorage = cachePreProcess(storage)
+      saveCache(processedStorage)
     }
 
     if (cachesInvalidated.get()) {
       FileUtil.delete(cacheFile)
     }
+  }
+
+  private fun cachePreProcess(storage: WorkspaceEntityStorage): WorkspaceEntityStorage {
+    val builder = WorkspaceEntityStorageBuilder.from(storage)
+    val nonPersistentModules = builder.entities(ModuleEntity::class.java)
+      .filter { it.entitySource == NonPersistentEntitySource }
+      .toList()
+    nonPersistentModules.forEach {
+      builder.removeEntity(it)
+    }
+    return builder.toStorage()
   }
 
   override fun dispose() = Unit

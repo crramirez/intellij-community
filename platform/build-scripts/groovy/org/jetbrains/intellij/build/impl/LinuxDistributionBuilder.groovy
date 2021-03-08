@@ -1,15 +1,11 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.intellij.build.impl
 
 import com.intellij.openapi.util.text.StringUtil
 import groovy.transform.CompileStatic
 import groovy.transform.TypeCheckingMode
 import org.jetbrains.annotations.NotNull
-import org.jetbrains.intellij.build.BuildContext
-import org.jetbrains.intellij.build.BuildOptions
-import org.jetbrains.intellij.build.JvmArchitecture
-import org.jetbrains.intellij.build.LinuxDistributionCustomizer
-import org.jetbrains.intellij.build.OsFamily
+import org.jetbrains.intellij.build.*
 import org.jetbrains.intellij.build.impl.productInfo.ProductInfoGenerator
 import org.jetbrains.intellij.build.impl.productInfo.ProductInfoValidator
 
@@ -38,7 +34,7 @@ final class LinuxDistributionBuilder extends OsSpecificDistributionBuilder {
 
   @Override
   @CompileStatic(TypeCheckingMode.SKIP)
-  void copyFilesForOsDistribution(@NotNull Path unixDistPath) {
+  void copyFilesForOsDistribution(@NotNull Path unixDistPath, JvmArchitecture arch = null) {
     buildContext.messages.progress("Building distributions for $targetOs.osName")
 
     Path distBinDir = unixDistPath.resolve("bin")
@@ -49,7 +45,7 @@ final class LinuxDistributionBuilder extends OsSpecificDistributionBuilder {
     BuildTasksImpl.unpackPty4jNative(buildContext, unixDistPath, "linux")
     BuildTasksImpl.addDbusJava(buildContext, unixDistPath)
     BuildTasksImpl.generateBuildTxt(buildContext, unixDistPath)
-    BuildTasksImpl.copyResourceFiles(buildContext, unixDistPath)
+    BuildTasksImpl.copyDistFiles(buildContext, unixDistPath)
     Files.copy(ideaProperties, distBinDir.resolve(ideaProperties.fileName), StandardCopyOption.REPLACE_EXISTING)
     //todo[nik] converting line separators to unix-style make sense only when building Linux distributions under Windows on a local machine;
     // for real installers we need to checkout all text files with 'lf' separators anyway
@@ -60,11 +56,13 @@ final class LinuxDistributionBuilder extends OsSpecificDistributionBuilder {
     generateScripts(distBinDir)
     generateVMOptions(distBinDir)
     generateReadme(unixDistPath)
+    generateVersionMarker(unixDistPath)
     customizer.copyAdditionalFiles(buildContext, unixDistPath)
   }
 
   @Override
   void buildArtifacts(Path osSpecificDistPath) {
+    copyFilesForOsDistribution(osSpecificDistPath)
     buildContext.executeStep("Build Linux .tar.gz", BuildOptions.LINUX_ARTIFACTS_STEP) {
       if (customizer.buildTarGzWithoutBundledJre) {
         buildContext.executeStep("Build Linux .tar.gz without bundled JRE", BuildOptions.LINUX_TAR_GZ_WITHOUT_BUNDLED_JRE_STEP) {
@@ -147,6 +145,14 @@ final class LinuxDistributionBuilder extends OsSpecificDistributionBuilder {
        "product"        : buildContext.productProperties.baseFileName,
        "product_vendor" : buildContext.applicationInfo.shortCompanyName,
        "system_selector": buildContext.systemSelector], "@@", "\n")
+  }
+
+  // please keep in sync with `SystemHealthMonitor#checkInstallationIntegrity`
+  @CompileStatic
+  private void generateVersionMarker(Path unixDistPath) {
+    Path targetDir = unixDistPath.resolve("lib")
+    Files.writeString(targetDir.resolve("build-marker-${buildContext.fullBuildNumber}"), buildContext.fullBuildNumber)
+    Files.createDirectories(targetDir)
   }
 
   @Override

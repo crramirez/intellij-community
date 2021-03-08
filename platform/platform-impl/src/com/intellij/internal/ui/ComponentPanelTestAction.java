@@ -1,9 +1,8 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.internal.ui;
 
 import com.google.common.collect.ImmutableList;
 import com.intellij.icons.AllIcons;
-import com.intellij.ide.BrowserUtil;
 import com.intellij.ide.HelpTooltip;
 import com.intellij.ide.ui.laf.darcula.DarculaUIUtil;
 import com.intellij.ide.ui.laf.darcula.ui.DarculaSliderUI;
@@ -20,7 +19,7 @@ import com.intellij.openapi.util.NlsActions;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.*;
-import com.intellij.ui.components.ActionLink;
+import com.intellij.ui.components.BrowserLink;
 import com.intellij.ui.components.DropDownLink;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.components.JBTabbedPane;
@@ -172,10 +171,7 @@ public class ComponentPanelTestAction extends DumbAwareAction {
       southPanel.add(placementCombo);
       southPanel.add(new Box.Filler(JBUI.size(0), JBUI.size(0), JBUI.size(Integer.MAX_VALUE, 0)));
 
-      ActionLink externalLink = new ActionLink("External link", event -> {
-        BrowserUtil.browse("http://google.com");
-      });
-      externalLink.setExternalLinkIcon();
+      BrowserLink externalLink = new BrowserLink("External link", "http://google.com");
       southPanel.add(externalLink);
       panel.addToBottom(southPanel);
 
@@ -533,7 +529,7 @@ public class ComponentPanelTestAction extends DumbAwareAction {
     private JComponent createValidatorsPanel() {
       // JTextField component with browse button
       TextFieldWithBrowseButton tfbb = new TextFieldWithBrowseButton(e -> System.out.println("JTextField browse button pressed"));
-      new ComponentValidator(getDisposable()).withValidator(() -> tfbb.getText().length() != 5 ? new ValidationInfo("Enter 5 symbols",  tfbb) : null).
+      new ComponentValidator(getDisposable()).withValidator(() -> tfbb.getText().length() < 50 ? new ValidationInfo(tfbb.getText() + " is too short. Enter at least 50 symbols",  tfbb) : null).
         withOutlineProvider(ComponentValidator.CWBB_PROVIDER).
         andStartOnFocusLost().
         installOn(tfbb);
@@ -948,7 +944,7 @@ public class ComponentPanelTestAction extends DumbAwareAction {
 
       ComboBox<Item> comboBox = new ComboBox<>(new Model(builder1.build()));
       comboBox.setSwingPopup(false);
-      ColoredListCellRenderer<Item> renderer = new ColoredListCellRenderer<Item>() {
+      ColoredListCellRenderer<Item> renderer = new ColoredListCellRenderer<>() {
         @Override
         protected void customizeCellRenderer(@NotNull JList<? extends Item> list,
                                              Item value,

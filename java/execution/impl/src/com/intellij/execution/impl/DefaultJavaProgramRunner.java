@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.execution.impl;
 
 import com.intellij.debugger.engine.JavaDebugProcess;
@@ -6,12 +6,8 @@ import com.intellij.debugger.impl.DebuggerUtilsEx;
 import com.intellij.debugger.impl.attach.JavaDebuggerAttachUtil;
 import com.intellij.debugger.impl.attach.PidRemoteConnection;
 import com.intellij.debugger.settings.DebuggerSettings;
-import com.intellij.execution.ExecutionBundle;
-import com.intellij.execution.ExecutionException;
-import com.intellij.execution.ExecutionManager;
-import com.intellij.execution.ExecutionResult;
+import com.intellij.execution.*;
 import com.intellij.execution.configurations.*;
-import com.intellij.execution.executors.DefaultDebugExecutor;
 import com.intellij.execution.executors.DefaultRunExecutor;
 import com.intellij.execution.process.*;
 import com.intellij.execution.runners.*;
@@ -32,6 +28,8 @@ import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.compiler.JavaCompilerBundle;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
+import com.intellij.openapi.progress.ProcessCanceledException;
+import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.NlsActions;
@@ -43,6 +41,7 @@ import com.intellij.unscramble.ThreadDumpConsoleFactory;
 import com.intellij.unscramble.ThreadDumpParser;
 import com.intellij.unscramble.ThreadState;
 import com.intellij.util.ArrayUtil;
+import com.intellij.util.SlowOperations;
 import com.intellij.util.TimeoutUtil;
 import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.messages.MessageBusConnection;
@@ -104,17 +103,16 @@ public class DefaultJavaProgramRunner implements JvmPatchableProgramRunner<Runne
     ExecutionManager executionManager = ExecutionManager.getInstance(environment.getProject());
     RunProfile runProfile = environment.getRunProfile();
     if (runProfile instanceof TargetEnvironmentAwareRunProfile &&
-        Experiments.getInstance().isFeatureEnabled("run.targets") &&
         currentState instanceof TargetEnvironmentAwareRunProfileState &&
-        ((TargetEnvironmentAwareRunProfile)runProfile).getDefaultTargetName() != null) {
+        Experiments.getInstance().isFeatureEnabled("run.targets")) {
       executionManager.startRunProfileWithPromise(environment, currentState, (ignored) -> {
         return doExecuteAsync((TargetEnvironmentAwareRunProfileState)currentState, environment);
       });
     }
     else {
-      executionManager.startRunProfile(environment, currentState, (ignored) -> {
+      executionManager.startRunProfile(environment, currentState, (ignored) -> SlowOperations.allowSlowOperations(() -> {
         return doExecute(currentState, environment);
-      });
+      }));
     }
   }
 
@@ -128,10 +126,27 @@ public class DefaultJavaProgramRunner implements JvmPatchableProgramRunner<Runne
     FileDocumentManager.getInstance().saveAllDocuments();
     ProcessProxy proxy = null;
     if (state instanceof JavaCommandLine) {
-      patchJavaCommandLineParams((JavaCommandLine)state, env);
+      if (!patchJavaCommandLineParamsUnderProgress((JavaCommandLine)state, env)) return null;
       proxy = ProcessProxyFactory.getInstance().createCommandLineProxy((JavaCommandLine)state);
     }
     return executeJavaState(state, env, proxy);
+  }
+
+  private boolean patchJavaCommandLineParamsUnderProgress(JavaCommandLine state, ExecutionEnvironment env) throws ExecutionException {
+    AtomicReference<ExecutionException> ex = new AtomicReference<>();
+    if (!ProgressManager.getInstance().runProcessWithProgressSynchronously(() -> {
+      try {
+        patchJavaCommandLineParams(state, env);
+      }
+      catch (ProcessCanceledException ignore) {}
+      catch (ExecutionException e) {
+        ex.set(e);
+      }
+    }, ExecutionBundle.message("progress.title.patch.java.command.line.parameters"), true, env.getProject())) {
+      return false;
+    }
+    if (ex.get() != null) throw ex.get();
+    return true;
   }
 
   private void patchJavaCommandLineParams(@NotNull JavaCommandLine state, @NotNull ExecutionEnvironment env)
@@ -143,7 +158,7 @@ public class DefaultJavaProgramRunner implements JvmPatchableProgramRunner<Runne
       ParametersList parametersList = parameters.getVMParametersList();
       if (parametersList.getList().stream().noneMatch(s -> s.startsWith("-agentlib:jdwp"))) {
         parametersList.add("-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,quiet=y");
-      }
+      } 
     }
   }
 
@@ -152,19 +167,23 @@ public class DefaultJavaProgramRunner implements JvmPatchableProgramRunner<Runne
                                                                    @NotNull ExecutionEnvironment env)
     throws ExecutionException {
     FileDocumentManager.getInstance().saveAllDocuments();
-
-    if (state instanceof JavaCommandLine) {
-      patchJavaCommandLineParams((JavaCommandLine)state, env);
-    }
-
-    if (!isExecutorSupportedOnTarget(env)) {
+    boolean isLocal = !((TargetEnvironmentAwareRunProfile)env.getRunProfile()).needPrepareTarget();
+    if (!isLocal && !isExecutorSupportedOnTarget(env)) {
       throw new ExecutionException(
         ExecutionBundle.message("run.configuration.action.is.supported.for.local.machine.only", env.getExecutor().getActionName())
       );
     }
 
-    return state.prepareTargetToCommandExecution(env, LOG, "Failed to execute java run configuration async", () -> {
-      return executeJavaState(state, env, null);
+    return state.prepareTargetToCommandExecution(env, LOG,"Failed to execute java run configuration async", () -> {
+      @Nullable ProcessProxy proxy = null;
+      if (state instanceof JavaCommandLine) {
+        patchJavaCommandLineParams((JavaCommandLine)state, env);
+        if (isLocal) {
+          proxy = ProcessProxyFactory.getInstance().createCommandLineProxy((JavaCommandLine)state);
+        }
+      }
+
+      return executeJavaState(state, env, proxy);
     });
   }
 
@@ -173,10 +192,8 @@ public class DefaultJavaProgramRunner implements JvmPatchableProgramRunner<Runne
    * supported for execution on targets other than the local machine.
    */
   private static boolean isExecutorSupportedOnTarget(@NotNull ExecutionEnvironment env) {
-    String executorId = env.getExecutor().getId();
-    return env.getTargetEnvironmentFactory() instanceof LocalTargetEnvironmentFactory
-           || DefaultDebugExecutor.EXECUTOR_ID.equalsIgnoreCase(executorId)
-           || DefaultRunExecutor.EXECUTOR_ID.equalsIgnoreCase(executorId);
+    Executor executor = env.getExecutor();
+    return env.getTargetEnvironmentFactory() instanceof LocalTargetEnvironmentFactory || executor.isSupportedOnTarget();
   }
 
   private @Nullable RunContentDescriptor executeJavaState(@NotNull RunProfileState state,
@@ -204,11 +221,15 @@ public class DefaultJavaProgramRunner implements JvmPatchableProgramRunner<Runne
       return null;
     }
 
-    RunContentBuilder contentBuilder = new RunContentBuilder(executionResult, env);
-    if (!(state instanceof JavaCommandLineState) || ((JavaCommandLineState)state).shouldAddJavaProgramRunnerActions()) {
-      addDefaultActions(contentBuilder, executionResult, state instanceof JavaCommandLine);
-    }
-    return contentBuilder.showRunContent(env.getContentToReuse());
+    AtomicReference<RunContentDescriptor> result = new AtomicReference<>();
+    ApplicationManager.getApplication().invokeAndWait(() -> {
+      RunContentBuilder contentBuilder = new RunContentBuilder(executionResult, env);
+      if (!(state instanceof JavaCommandLineState) || ((JavaCommandLineState)state).shouldAddJavaProgramRunnerActions()) {
+        addDefaultActions(contentBuilder, executionResult, state instanceof JavaCommandLine);
+      }
+      result.set(contentBuilder.showRunContent(env.getContentToReuse()));
+    });
+    return result.get();
   }
 
   private static void addDefaultActions(@NotNull RunContentBuilder contentBuilder,

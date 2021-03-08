@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.util.lang;
 
 import com.intellij.ide.BytecodeTransformer;
@@ -12,7 +12,7 @@ import java.security.ProtectionDomain;
 @ApiStatus.Internal
 public final class PathClassLoader extends UrlClassLoader {
   private static final ClassPath.ResourceFileFactory RESOURCE_FILE_FACTORY =
-    Boolean.getBoolean("idea.use.lock.free.zip.impl") ? file -> new ZipResourceFile(file) : null;
+    Boolean.parseBoolean(System.getProperty("idea.use.lock.free.zip.impl", "true")) ? file -> new ZipResourceFile(file) : null;
 
   private static final boolean isParallelCapable = USE_PARALLEL_LOADING && registerAsParallelCapable();
   private static final ClassLoader appClassLoader = PathClassLoader.class.getClassLoader();
@@ -30,7 +30,7 @@ public final class PathClassLoader extends UrlClassLoader {
   }
 
   public PathClassLoader(Builder builder, BytecodeTransformer transformer) {
-    super(builder, isParallelCapable);
+    super(builder, RESOURCE_FILE_FACTORY, isParallelCapable);
 
     this.transformer = transformer;
   }
@@ -38,7 +38,7 @@ public final class PathClassLoader extends UrlClassLoader {
   // for java.system.class.loader
   @ApiStatus.Internal
   public PathClassLoader(@NotNull ClassLoader parent) {
-    super(createDefaultBuilderForJdk(parent), null, isParallelCapable);
+    super(createDefaultBuilderForJdk(parent), RESOURCE_FILE_FACTORY, isParallelCapable);
 
     transformer = null;
     registerInClassLoaderValueMap(parent, this);
@@ -53,7 +53,13 @@ public final class PathClassLoader extends UrlClassLoader {
       return appClassLoader.loadClass(name);
     }
 
-    Class<?> clazz = classPath.findClass(name);
+    Class<?> clazz;
+    try {
+      clazz = classPath.findClass(name);
+    }
+    catch (IOException e) {
+      throw new ClassNotFoundException(name, e);
+    }
     if (clazz == null) {
       throw new ClassNotFoundException(name);
     }

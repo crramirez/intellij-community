@@ -9,6 +9,7 @@ import com.intellij.ide.IdeBundle;
 import com.intellij.ide.SearchTopHitProvider;
 import com.intellij.ide.actions.BigPopupUI;
 import com.intellij.ide.actions.searcheverywhere.SearchEverywhereHeader.SETab;
+import com.intellij.ide.actions.searcheverywhere.statistics.SearchEverywhereMLStatisticsCollector;
 import com.intellij.ide.actions.searcheverywhere.statistics.SearchEverywhereUsageTriggerCollector;
 import com.intellij.ide.actions.searcheverywhere.statistics.SearchFieldStatisticsCollector;
 import com.intellij.ide.util.gotoByName.QuickSearchComponent;
@@ -61,11 +62,13 @@ import com.intellij.util.ui.EmptyIcon;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.StatusText;
 import com.intellij.util.ui.UIUtil;
+import com.intellij.accessibility.TextFieldWithListAccessibleContext;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
 
+import javax.accessibility.AccessibleContext;
 import javax.swing.*;
 import javax.swing.event.DocumentEvent;
 import java.awt.*;
@@ -102,6 +105,8 @@ public final class SearchEverywhereUI extends BigPopupUI implements DataProvider
   private final ThrottlingListenerWrapper myBufferedListener;
   private ProgressIndicator mySearchProgressIndicator;
   private final SEListSelectionTracker mySelectionTracker;
+  private final SearchFieldTypingListener mySearchTypingListener;
+  private final SearchEverywhereMLStatisticsCollector myMLStatisticsCollector;
 
   public SearchEverywhereUI(@Nullable Project project,
                             Map<SearchEverywhereContributor<?>, SearchEverywhereTabDescriptor> contributors) {
@@ -110,7 +115,7 @@ public final class SearchEverywhereUI extends BigPopupUI implements DataProvider
 
   public SearchEverywhereUI(@Nullable Project project,
                             Map<SearchEverywhereContributor<?>, SearchEverywhereTabDescriptor> contributors,
-                            @NotNull Function<String, String> shortcutSupplier) {
+                            @NotNull Function<? super String, String> shortcutSupplier) {
     super(project);
     myListFactory = Experiments.getInstance().isFeatureEnabled("search.everywhere.mixed.results")
                     ? new MixedListFactory()
@@ -151,6 +156,9 @@ public final class SearchEverywhereUI extends BigPopupUI implements DataProvider
 
     mySelectionTracker = new SEListSelectionTracker(myResultsList, myListModel);
     myResultsList.addListSelectionListener(mySelectionTracker);
+    mySearchTypingListener = new SearchFieldTypingListener();
+    mySearchField.addKeyListener(mySearchTypingListener);
+    myMLStatisticsCollector = new SearchEverywhereMLStatisticsCollector(myProject);
 
     Disposer.register(this, SearchFieldStatisticsCollector.createAndStart(mySearchField, myProject));
   }
@@ -344,6 +352,15 @@ public final class SearchEverywhereUI extends BigPopupUI implements DataProvider
   @Override
   protected ExtendableTextField createSearchField() {
     SearchField res = new SearchField() {
+
+      @Override
+      public AccessibleContext getAccessibleContext() {
+        if (accessibleContext == null) {
+          accessibleContext = new TextFieldWithListAccessibleContext(this, myResultsList.getAccessibleContext());
+        }
+        return accessibleContext;
+      }
+
       @NotNull
       @Override
       protected Extension getLeftExtension() {
@@ -525,7 +542,7 @@ public final class SearchEverywhereUI extends BigPopupUI implements DataProvider
     registerSelectItemAction();
 
     AnAction escape = ActionManager.getInstance().getAction("EditorEscape");
-    DumbAwareAction.create(__ -> closePopup())
+    DumbAwareAction.create(__ -> sendStatisticsAndClose())
       .registerCustomShortcutSet(escape == null ? CommonShortcuts.ESCAPE : escape.getShortcutSet(), this);
 
     mySearchField.getDocument().addDocumentListener(new DocumentAdapter() {
@@ -575,7 +592,7 @@ public final class SearchEverywhereUI extends BigPopupUI implements DataProvider
       public void focusLost(FocusEvent e) {
         Component oppositeComponent = e.getOppositeComponent();
         if (!isHintComponent(oppositeComponent) && !UIUtil.haveCommonOwner(SearchEverywhereUI.this, oppositeComponent)) {
-          closePopup();
+          sendStatisticsAndClose();
         }
       }
     });
@@ -749,8 +766,13 @@ public final class SearchEverywhereUI extends BigPopupUI implements DataProvider
       }
       featureTriggered(SearchEverywhereUsageTriggerCollector.CONTRIBUTOR_ITEM_SELECTED, data);
 
+
       closePopup |= contributor.processSelectedItem(value, modifiers, searchText);
     }
+
+    myMLStatisticsCollector.recordSelectedItem(indexes, closePopup, () -> myListModel.getFoundElementsInfo(),
+                                               mySearchTypingListener.mySymbolKeysTyped, mySearchTypingListener.myBackspacesTyped,
+                                               mySearchField.getText().length(), myHeader.getSelectedTab().getID());
 
     if (closePopup) {
       closePopup();
@@ -795,6 +817,16 @@ public final class SearchEverywhereUI extends BigPopupUI implements DataProvider
     if (myBufferedListener != null) {
       myBufferedListener.clearBuffer();
     }
+  }
+
+  private void sendStatisticsAndClose() {
+    if (isShowing()) {
+      myMLStatisticsCollector.recordPopupClosed(
+        () -> myListModel.getFoundElementsInfo(),
+        mySearchTypingListener.mySymbolKeysTyped, mySearchTypingListener.myBackspacesTyped,
+        mySearchField.getText().length(), myHeader.getSelectedTab().getID());
+    }
+    closePopup();
   }
 
   private void closePopup() {
@@ -943,7 +975,7 @@ public final class SearchEverywhereUI extends BigPopupUI implements DataProvider
       else {
         showInFindWindow(targets, usages, presentation);
       }
-      closePopup();
+      sendStatisticsAndClose();
     }
 
     private void fillUsages(Collection<Object> foundElements, Collection<? super Usage> usages, Collection<? super PsiElement> targets) {
@@ -1047,7 +1079,7 @@ public final class SearchEverywhereUI extends BigPopupUI implements DataProvider
   private final SearchListener mySearchListener = new SearchListener();
 
   private class SearchListener implements SESearcher.Listener {
-    private Consumer<List<Object>> testCallback;
+    private @Nullable Consumer<? super List<Object>> testCallback;
 
     @Override
     public void elementsAdded(@NotNull List<? extends SearchEverywhereFoundElementInfo> list) {
@@ -1120,25 +1152,46 @@ public final class SearchEverywhereUI extends BigPopupUI implements DataProvider
                                SimpleTextAttributes.LINK_PLAIN_ATTRIBUTES, clearFiltersAction);
       }
 
-      Optional.ofNullable(myProject)
-        .map(project -> FindInProjectManager.getInstance(project))
-        .filter(manager -> manager.isEnabled())
-        .ifPresent(manager -> {
-          DataContext context = DataManager.getInstance().getDataContext(SearchEverywhereUI.this);
-          ActionListener findInFilesAction = e -> manager.findInProject(context, null);
+      boolean showFindInFilesAction = myHeader.getSelectedTab().getContributors().stream().anyMatch(contributor -> contributor.showInFindResults());
+      if (showFindInFilesAction) {
+        Optional.ofNullable(myProject)
+          .map(project -> FindInProjectManager.getInstance(project))
+          .filter(manager -> manager.isEnabled())
+          .ifPresent(manager -> {
+            DataContext context = DataManager.getInstance().getDataContext(SearchEverywhereUI.this);
+            ActionListener findInFilesAction = e -> manager.findInProject(context, null);
 
-          String findInFilesText = IdeBundle.message("searcheverywhere.try.to.find.in.files");
-          String findInFilesShortcut = KeymapUtil.getFirstKeyboardShortcutText("FindInPath");
-          emptyStatus.appendLine(findInFilesText, SimpleTextAttributes.LINK_PLAIN_ATTRIBUTES, findInFilesAction);
-          if (StringUtil.isEmpty(findInFilesShortcut)) {
-            emptyStatus.appendText(" " + findInFilesShortcut);
-          }
-        });
+            String findInFilesText = IdeBundle.message("searcheverywhere.try.to.find.in.files");
+            String findInFilesShortcut = KeymapUtil.getFirstKeyboardShortcutText("FindInPath");
+            emptyStatus.appendLine(findInFilesText, SimpleTextAttributes.LINK_PLAIN_ATTRIBUTES, findInFilesAction);
+            if (!StringUtil.isEmpty(findInFilesShortcut)) {
+              emptyStatus.appendText(" (" + findInFilesShortcut + ")");
+            }
+          });
+      }
     }
 
     @TestOnly
-    void setTestCallback(@Nullable Consumer<List<Object>> callback) {
+    void setTestCallback(@Nullable Consumer<? super List<Object>> callback) {
       testCallback = callback;
+    }
+  }
+
+  private static class SearchFieldTypingListener extends KeyAdapter {
+    private int mySymbolKeysTyped;
+    private int myBackspacesTyped;
+
+    @Override
+    public void keyTyped(KeyEvent e) {
+      mySymbolKeysTyped++;
+    }
+
+    @Override
+    public void keyReleased(KeyEvent e) {
+      final int code = e.getKeyCode();
+      if (code == KeyEvent.VK_BACK_SPACE || code == KeyEvent.VK_DELETE) {
+        myBackspacesTyped++;
+      }
     }
   }
 

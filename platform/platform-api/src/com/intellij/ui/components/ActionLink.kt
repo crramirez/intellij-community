@@ -1,9 +1,10 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ui.components
 
 import com.intellij.icons.AllIcons
-import com.intellij.ui.scale.JBUIScale
+import com.intellij.ui.scale.JBUIScale.scale
 import org.jetbrains.annotations.Nls
+import java.awt.Font
 import java.awt.event.ActionEvent
 import java.awt.event.ActionListener
 import javax.swing.Action
@@ -15,6 +16,7 @@ open class ActionLink() : JButton() {
   override fun getUIClassID() = "LinkButtonUI"
 
   init {
+    @Suppress("LeakingThis")
     addPropertyChangeListener("enabled") { if (autoHideOnDisable) isVisible = isEnabled }
   }
 
@@ -49,11 +51,17 @@ open class ActionLink() : JButton() {
     }
 
   fun setLinkIcon() = setIcon(AllIcons.Ide.Link, false)
+  fun setContextHelpIcon() = setIcon(AllIcons.General.ContextHelp, false)
   fun setExternalLinkIcon() = setIcon(AllIcons.Ide.External_link_arrow, true)
   fun setDropDownLinkIcon() = setIcon(AllIcons.General.LinkDropTriangle, true)
   fun setIcon(anIcon: Icon, atRight: Boolean) {
     icon = anIcon
-    iconTextGap = JBUIScale.scale(if (atRight) 1 else 4)
+    iconTextGap = scale(if (atRight) 1 else 4)
     horizontalTextPosition = if (atRight) SwingConstants.LEADING else SwingConstants.TRAILING
+  }
+
+  fun withFont(font: Font): ActionLink {
+    setFont(font)
+    return this
   }
 }

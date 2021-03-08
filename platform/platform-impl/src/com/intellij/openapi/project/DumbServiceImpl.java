@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.project;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -14,7 +14,10 @@ import com.intellij.ide.plugins.cl.PluginAwareClassLoader;
 import com.intellij.internal.statistic.IdeActivity;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.application.*;
+import com.intellij.openapi.application.Application;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ModalityState;
+import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.application.impl.ApplicationImpl;
 import com.intellij.openapi.diagnostic.Attachment;
 import com.intellij.openapi.diagnostic.Logger;
@@ -28,6 +31,7 @@ import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.progress.impl.ProgressManagerImpl;
 import com.intellij.openapi.progress.impl.ProgressSuspender;
 import com.intellij.openapi.progress.util.AbstractProgressIndicatorExBase;
+import com.intellij.openapi.progress.util.PingProgress;
 import com.intellij.openapi.progress.util.RelayUiToDelegateIndicator;
 import com.intellij.openapi.startup.StartupActivity;
 import com.intellij.openapi.startup.StartupManager;
@@ -115,9 +119,9 @@ public class DumbServiceImpl extends DumbService implements Disposable, Modifica
 
   private static final class RunnableDelegate implements Runnable {
     final Runnable task;
-    private final Consumer<Runnable> executor;
+    private final @NotNull Consumer<? super Runnable> executor;
 
-    private RunnableDelegate(@NotNull Runnable task, @NotNull Consumer<Runnable> executor) {
+    private RunnableDelegate(@NotNull Runnable task, @NotNull Consumer<? super Runnable> executor) {
       this.task = task;
       this.executor = executor;
     }
@@ -302,7 +306,7 @@ public class DumbServiceImpl extends DumbService implements Disposable, Modifica
       runnable.run(); // will log errors if not already in a write-safe context
     }
     else {
-      TransactionGuard.submitTransaction(myProject, runnable);
+      myTrackedEdtActivityService.submitTransaction(runnable);
     }
   }
 
@@ -432,6 +436,7 @@ public class DumbServiceImpl extends DumbService implements Disposable, Modifica
     while (!(myState.get() == State.SMART ||
              myState.get() == State.WAITING_PROJECT_SMART_MODE_STARTUP_TASKS)
            && !myProject.isDisposed()) {
+      PingProgress.interactWithEdtProgress();
       LockSupport.parkNanos(50_000_000);
       // polls next dumb mode task
       myTrackedEdtActivityService.executeAllQueuedActivities();
@@ -625,7 +630,7 @@ public class DumbServiceImpl extends DumbService implements Disposable, Modifica
       finally {
         shutdownTracker.unregisterStopperThread(self);
         // myCurrentSuspender should already be null at this point unless we got here by exception. In any case, the suspender might have
-        // got suspended after the the last dumb task finished (or even after the last check cancelled call). This case is handled by
+        // got suspended after the last dumb task finished (or even after the last check cancelled call). This case is handled by
         // the ProgressSuspender close() method called at the exit of this try-with-resources block which removes the hook if it has been
         // previously installed.
         myHeavyActivities.resetCurrentSuspender();

@@ -121,6 +121,11 @@ public class StringUtil extends StringUtilRt {
     return replace(replace(text, "'", "''"), "{", "'{'");
   }
 
+  /**
+   * @deprecated use {@link Object#toString()} instead
+   */
+  @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   @Contract(pure = true)
   public static @NotNull <T> Function<T, String> createToStringFunction(@SuppressWarnings("unused") @NotNull Class<T> cls) {
     return Object::toString;
@@ -146,6 +151,7 @@ public class StringUtil extends StringUtilRt {
    */
   @Contract(pure = true)
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static @NotNull String replaceChar(@NotNull String buffer, char oldChar, char newChar) {
     return buffer.replace(oldChar, newChar);
   }
@@ -202,9 +208,9 @@ public class StringUtil extends StringUtilRt {
   }
 
   @Contract(pure = true)
-  public static int lastIndexOfIgnoreCase(@NotNull String where, char what, int fromIndex) {
+  public static int lastIndexOfIgnoreCase(@NotNull String where, char c, int fromIndex) {
     for (int i = Math.min(fromIndex, where.length() - 1); i >= 0; i--) {
-      if (charsEqualIgnoreCase(where.charAt(i), what)) {
+      if (charsEqualIgnoreCase(where.charAt(i), c)) {
         return i;
       }
     }
@@ -472,16 +478,6 @@ public class StringUtil extends StringUtilRt {
   private static final String[] ourOtherNonCapitalizableWords = {
     "iOS", "iPhone", "iPad", "iMac"
   };
-
-  /**
-   * @deprecated Use {@link #isPreposition(String, int, int, String[])}.
-   */
-  @ApiStatus.ScheduledForRemoval(inVersion = "2020.1")
-  @Deprecated
-  @Contract(pure = true)
-  public static boolean isPreposition(@NotNull String s, int firstChar, int lastChar) {
-    return isPreposition(s, firstChar, lastChar, ourPrepositions);
-  }
 
   @Contract(pure = true)
   public static boolean isPreposition(@NotNull String s, int firstChar, int lastChar, String @NotNull [] prepositions) {
@@ -1485,6 +1481,7 @@ public class StringUtil extends StringUtilRt {
    */
   @Contract(pure = true)
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static @NotNull @NonNls String formatDurationPadded(long millis, @NotNull String unitSeparator) {
     return Formats.formatDurationPadded(millis, unitSeparator);
   }
@@ -1494,6 +1491,7 @@ public class StringUtil extends StringUtilRt {
    */
   @Contract(pure = true)
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static @NotNull @NonNls String formatDurationApproximate(long duration) {
     return Formats.formatDurationApproximate(duration);
   }
@@ -1539,6 +1537,7 @@ public class StringUtil extends StringUtilRt {
    * @deprecated use #capitalize(String)
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   @Contract(value = "null -> null; !null -> !null", pure = true)
   public static String firstLetterToUpperCase(final @Nullable String displayString) {
     if (displayString == null || displayString.isEmpty()) return displayString;
@@ -2129,15 +2128,6 @@ public class StringUtil extends StringUtilRt {
       }
     }
     return escaped;
-  }
-
-  /**
-   * @deprecated Use {@link #replace(String, List, List)}
-   */
-  @Deprecated
-  @Contract(pure = true)
-  public static @NotNull String replace(@NotNull String text, String @NotNull [] from, String @NotNull [] to) {
-    return replace(text, Arrays.asList(from), Arrays.asList(to));
   }
 
   @Contract(pure = true)
@@ -3114,13 +3104,6 @@ public class StringUtil extends StringUtilRt {
       bytes[i / 2] = (byte)((Character.digit(str.charAt(i), 16) << 4) + Character.digit(str.charAt(i + 1), 16));
     }
     return bytes;
-  }
-
-  /** @deprecated use {@link #startsWithConcatenation(String, String...)} */
-  @Deprecated
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.1")
-  public static boolean startsWithConcatenationOf(@NotNull String string, @NotNull String firstPrefix, @NotNull String secondPrefix) {
-    return startsWithConcatenation(string, firstPrefix, secondPrefix);
   }
 
   /**

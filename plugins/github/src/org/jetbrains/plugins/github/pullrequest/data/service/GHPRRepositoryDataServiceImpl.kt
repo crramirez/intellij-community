@@ -1,8 +1,11 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.plugins.github.pullrequest.data.service
 
 import com.intellij.openapi.progress.ProgressManager
-import org.jetbrains.plugins.github.api.*
+import org.jetbrains.plugins.github.api.GHGQLRequests
+import org.jetbrains.plugins.github.api.GHRepositoryCoordinates
+import org.jetbrains.plugins.github.api.GithubApiRequestExecutor
+import org.jetbrains.plugins.github.api.GithubApiRequests
 import org.jetbrains.plugins.github.api.data.GHLabel
 import org.jetbrains.plugins.github.api.data.GHRepositoryOwnerName
 import org.jetbrains.plugins.github.api.data.GHUser
@@ -11,16 +14,23 @@ import org.jetbrains.plugins.github.api.data.pullrequest.GHPullRequestRequestedR
 import org.jetbrains.plugins.github.api.data.pullrequest.GHTeam
 import org.jetbrains.plugins.github.api.util.GithubApiPagesLoader
 import org.jetbrains.plugins.github.api.util.SimpleGHGQLPagesLoader
+import org.jetbrains.plugins.github.util.GitRemoteUrlCoordinates
 import org.jetbrains.plugins.github.util.LazyCancellableBackgroundProcessValue
 import java.util.concurrent.CompletableFuture
 import java.util.function.BiFunction
 
 class GHPRRepositoryDataServiceImpl internal constructor(progressManager: ProgressManager,
                                                          private val requestExecutor: GithubApiRequestExecutor,
-                                                         private val serverPath: GithubServerPath,
-                                                         private val repoPath: GHRepositoryPath,
-                                                         private val repoOwner: GHRepositoryOwnerName)
+                                                         override val remoteCoordinates: GitRemoteUrlCoordinates,
+                                                         override val repositoryCoordinates: GHRepositoryCoordinates,
+                                                         private val repoOwner: GHRepositoryOwnerName,
+                                                         override val repositoryId: String,
+                                                         override val defaultBranchName: String,
+                                                         override val isFork: Boolean)
   : GHPRRepositoryDataService {
+
+  private val serverPath = repositoryCoordinates.serverPath
+  private val repoPath = repositoryCoordinates.repositoryPath
 
   init {
     requestExecutor.addListener(this) {

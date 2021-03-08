@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.java.generate.view;
 
 import com.intellij.java.JavaBundle;
@@ -11,7 +11,6 @@ import com.intellij.openapi.util.Cloner;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Factory;
 import com.intellij.openapi.util.NlsContexts;
-import gnu.trove.Equality;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.Nullable;
@@ -22,9 +21,10 @@ import org.jetbrains.java.generate.template.toString.ToStringTemplatesManager;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Objects;
+import java.util.function.BiPredicate;
 
 public class TemplatesPanel extends NamedItemsListEditor<TemplateResource> {
-  private static final Namer<TemplateResource> NAMER = new Namer<TemplateResource>() {
+  private static final Namer<TemplateResource> NAMER = new Namer<>() {
     @Override
     public String getName(TemplateResource templateResource) {
       return templateResource.getFileName();
@@ -43,7 +43,7 @@ public class TemplatesPanel extends NamedItemsListEditor<TemplateResource> {
 
   private static final Factory<TemplateResource> FACTORY = () -> new TemplateResource();
 
-  private static final Cloner<TemplateResource> CLONER = new Cloner<TemplateResource>() {
+  private static final Cloner<TemplateResource> CLONER = new Cloner<>() {
     @Override
     public TemplateResource cloneOf(TemplateResource templateResource) {
       if (templateResource.isDefault()) return templateResource;
@@ -59,7 +59,7 @@ public class TemplatesPanel extends NamedItemsListEditor<TemplateResource> {
     }
   };
 
-  private static final Equality<TemplateResource> COMPARER =
+  private static final BiPredicate<TemplateResource, TemplateResource> COMPARER =
     (o1, o2) -> Objects.equals(o1.getTemplate(), o2.getTemplate()) && Objects.equals(o1.getFileName(), o2.getFileName());
   private final Project myProject;
   private final TemplatesManager myTemplatesManager;

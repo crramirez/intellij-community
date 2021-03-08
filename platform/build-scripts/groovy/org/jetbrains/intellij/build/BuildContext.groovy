@@ -1,6 +1,7 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.intellij.build
 
+import com.intellij.openapi.util.Pair
 import groovy.transform.CompileStatic
 import org.jetbrains.annotations.NotNull
 import org.jetbrains.annotations.Nullable
@@ -44,19 +45,13 @@ abstract class BuildContext implements CompilationContext {
   List<String> bootClassPathJarNames
 
   /**
-   * Add file to be copied into application resources.
+   * Add file to be copied into application.
    */
-  abstract void addResourceFile(@NotNull Path file)
+  abstract void addDistFile(@NotNull Pair<Path, String> file)
 
-  abstract @NotNull Collection<Path> getResourceFiles();
+  abstract @NotNull Collection<Pair<Path, String>> getDistFiles();
 
   abstract boolean includeBreakGenLibraries()
-
-  /**
-   * If the method returns {@code false} 'idea.jars.nocopy' property will be set to {@code true} in idea.properties by default. Otherwise it
-   * won't be set and the IDE will copy library *.jar files to avoid their locking when running under Windows.
-   */
-  abstract boolean shouldIDECopyJarsByDefault()
 
   abstract void patchInspectScript(@NotNull Path path)
 

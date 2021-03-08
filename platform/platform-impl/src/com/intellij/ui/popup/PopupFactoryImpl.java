@@ -22,10 +22,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.MessageType;
 import com.intellij.openapi.ui.popup.*;
 import com.intellij.openapi.ui.popup.util.BaseListPopupStep;
-import com.intellij.openapi.util.Condition;
-import com.intellij.openapi.util.EmptyRunnable;
-import com.intellij.openapi.util.Key;
-import com.intellij.openapi.util.NlsContexts;
+import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.NlsContexts.PopupTitle;
 import com.intellij.openapi.wm.WindowManager;
 import com.intellij.ui.CollectionListModel;
@@ -140,7 +137,7 @@ public class PopupFactoryImpl extends JBPopupFactory {
                                       final Runnable onYes,
                                       final Runnable onNo,
                                       int defaultOptionIndex) {
-    final BaseListPopupStep<String> step = new BaseListPopupStep<String>(title, yesText, noText) {
+    final BaseListPopupStep<String> step = new BaseListPopupStep<>(title, yesText, noText) {
       @Override
       public PopupStep onChosen(String selectedValue, final boolean finalChoice) {
         return doFinalStep(selectedValue.equals(yesText) ? onYes : onNo);
@@ -279,20 +276,6 @@ public class PopupFactoryImpl extends JBPopupFactory {
 
       return new ActionPopupStep(items, title, getComponentContextSupplier(component), actionPlace, showNumbers || honorActionMnemonics && itemsHaveMnemonics(items),
                                  preselectActionCondition, autoSelection, showDisabledActions, presentationFactory);
-    }
-
-    /** @deprecated Use {@link ActionPopupStep#createActionItems(ActionGroup, DataContext, boolean, boolean, boolean, boolean, String, PresentationFactory)} instead. */
-    @Deprecated
-    @NotNull
-    public static List<ActionItem> getActionItems(@NotNull ActionGroup actionGroup,
-                                                  @NotNull DataContext dataContext,
-                                                  boolean showNumbers,
-                                                  boolean useAlphaAsNumbers,
-                                                  boolean showDisabledActions,
-                                                  boolean honorActionMnemonics,
-                                                  @Nullable String actionPlace) {
-      return ActionPopupStep.createActionItems(
-        actionGroup, dataContext, showNumbers, useAlphaAsNumbers, showDisabledActions, honorActionMnemonics, actionPlace, null);
     }
 
     @Override
@@ -679,9 +662,11 @@ public class PopupFactoryImpl extends JBPopupFactory {
   }
 
 
-  public static class ActionItem implements ShortcutProvider, AnActionHolder {
+  public static class ActionItem implements ShortcutProvider, AnActionHolder, NumericMnemonicItem {
     private final AnAction myAction;
-    private @NlsContexts.ListItem String myText;
+    private @NlsActions.ActionText String myText;
+    private final Character myMnemonicChar;
+    private final boolean myMnemonicsEnabled;
     private final boolean myIsEnabled;
     private final Icon myIcon;
     private final Icon mySelectedIcon;
@@ -691,7 +676,9 @@ public class PopupFactoryImpl extends JBPopupFactory {
     private final @NlsContexts.ListItem String myValue;
 
     ActionItem(@NotNull AnAction action,
-               @NotNull @NlsContexts.ListItem String text,
+               @NotNull @NlsActions.ActionText String text,
+               @Nullable Character mnemonicChar,
+               boolean mnemonicsEnabled,
                @Nullable @NlsContexts.DetailedDescription String description,
                boolean enabled,
                @Nullable Icon icon,
@@ -701,6 +688,8 @@ public class PopupFactoryImpl extends JBPopupFactory {
                @Nullable @NlsContexts.ListItem String value) {
       myAction = action;
       myText = text;
+      myMnemonicChar = mnemonicChar;
+      myMnemonicsEnabled = mnemonicsEnabled;
       myIsEnabled = enabled;
       myIcon = icon;
       mySelectedIcon = selectedIcon;
@@ -715,6 +704,17 @@ public class PopupFactoryImpl extends JBPopupFactory {
       });
     }
 
+    @Nullable
+    @Override
+    public Character getMnemonicChar() {
+      return myMnemonicChar;
+    }
+
+    @Override
+    public boolean digitMnemonicsEnabled() {
+      return myMnemonicsEnabled;
+    }
+
     @NotNull
     @Override
     public AnAction getAction() {
@@ -722,8 +722,7 @@ public class PopupFactoryImpl extends JBPopupFactory {
     }
 
     @NotNull
-    @NlsContexts.ListItem
-    public String getText() {
+    public @NlsActions.ActionText String getText() {
       return myText;
     }
 

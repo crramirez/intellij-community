@@ -74,6 +74,13 @@ Includes the following features:</p>
     <spellchecker.support language="Markdown"
                           implementationClass="org.intellij.plugins.markdown.spellchecking.MarkdownSpellcheckingStrategy"/>
 
+    <applicationService serviceImplementation="org.intellij.plugins.markdown.settings.pandoc.PandocApplicationSettings"/>
+    <applicationConfigurable id="Settings.Pandoc"
+                             bundle="messages.MarkdownBundle"
+                             groupId="tools"
+                             key="markdown.settings.pandoc.name"
+                             instance="org.intellij.plugins.markdown.settings.pandoc.PandocSettingsConfigurable"/>
+
     <applicationConfigurable id="Settings.Markdown"
                              bundle="messages.MarkdownBundle"
                              groupId="language"
@@ -128,9 +135,9 @@ Includes the following features:</p>
     <registryKey key="markdown.formatter.apply.to.code.fence"
                  defaultValue="false"
                  description="Should Markdown use injected languages' formatters to format code-fences"/>
-    <registryKey key="markdown.mermaid.download.link"
-                 defaultValue="https://unpkg.com/mermaid@8.6.0/dist/mermaid.js"
-                 description="Link which Markdown plugin will use to download Mermaid.js library"/>
+    <registryKey key="markdown.mermaid.theme"
+                 defaultValue="follow-ide"
+                 description="Theme name to be used for Mermaid.js diagrams (set to 'follow-ide' to let the IDE decide)"/>
     <registryKey key="markdown.structure.view.list.visibility"
                  defaultValue="false"
                  description="Determines whether lists are visible in the document structure view"/>

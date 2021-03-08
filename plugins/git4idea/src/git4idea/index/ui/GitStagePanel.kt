@@ -1,10 +1,13 @@
 // Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package git4idea.index.ui
 
+import com.intellij.dvcs.ui.RepositoryChangesBrowserNode
 import com.intellij.ide.DataManager
+import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.actionSystem.ex.ActionUtil
+import com.intellij.openapi.actionSystem.ex.ActionUtil.performActionDumbAwareWithCallbacks
 import com.intellij.openapi.components.service
 import com.intellij.openapi.progress.util.ProgressWindow
 import com.intellij.openapi.project.Project
@@ -16,9 +19,10 @@ import com.intellij.openapi.vcs.changes.ChangeListListener
 import com.intellij.openapi.vcs.changes.ChangeListManagerImpl
 import com.intellij.openapi.vcs.changes.ChangesViewManager.createTextStatusFactory
 import com.intellij.openapi.vcs.changes.EditorTabPreview
-import com.intellij.openapi.vcs.changes.ui.ChangesTree
-import com.intellij.openapi.vcs.changes.ui.TreeActionsToolbarPanel
-import com.intellij.openapi.vcs.changes.ui.TreeModelBuilder
+import com.intellij.openapi.vcs.changes.InclusionListener
+import com.intellij.openapi.vcs.changes.ui.*
+import com.intellij.openapi.vcs.changes.ui.ChangesGroupingSupport.Companion.REPOSITORY_GROUPING
+import com.intellij.openapi.vcs.checkin.CheckinHandler
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.ui.OnePixelSplitter
@@ -28,14 +32,17 @@ import com.intellij.ui.SideBorder
 import com.intellij.ui.components.panels.Wrapper
 import com.intellij.ui.switcher.QuickActionProvider
 import com.intellij.util.EditSourceOnDoubleClickHandler
+import com.intellij.util.EventDispatcher
 import com.intellij.util.OpenSourceUtil
 import com.intellij.util.Processor
 import com.intellij.util.concurrency.annotations.RequiresEdt
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.JBUI.Borders.empty
 import com.intellij.util.ui.JBUI.Panels.simplePanel
+import com.intellij.util.ui.ThreeStateCheckBox
 import com.intellij.util.ui.tree.TreeUtil
 import com.intellij.vcs.commit.CommitStatusPanel
+import com.intellij.vcs.commit.CommitWorkflowListener
 import com.intellij.vcs.commit.EditedCommitNode
 import com.intellij.vcs.log.runInEdt
 import com.intellij.vcs.log.runInEdtAsync
@@ -57,7 +64,11 @@ import git4idea.repo.GitRepository
 import git4idea.repo.GitRepositoryManager
 import git4idea.status.GitChangeProvider
 import java.awt.BorderLayout
+import java.beans.PropertyChangeListener
+import java.util.*
+import java.util.stream.Collectors
 import javax.swing.JPanel
+import org.jetbrains.annotations.NonNls
 
 internal class GitStagePanel(private val tracker: GitStageTracker,
                              isVertical: Boolean,
@@ -67,7 +78,8 @@ internal class GitStagePanel(private val tracker: GitStageTracker,
   JPanel(BorderLayout()), DataProvider, Disposable {
   private val project = tracker.project
 
-  val tree: GitStageTree
+  private val _tree: MyChangesTree
+  val tree: ChangesTree get() = _tree
   private val treeMessageSplitter: Splitter
   private val commitPanel: GitStageCommitPanel
   private val commitWorkflowHandler: GitStageCommitWorkflowHandler
@@ -85,7 +97,7 @@ internal class GitStagePanel(private val tracker: GitStageTracker,
   private var hasPendingUpdates = false
 
   init {
-    tree = MyChangesTree(project)
+    _tree = MyChangesTree(project)
 
     commitPanel = GitStageCommitPanel(project)
     commitPanel.commitActionsPanel.isCommitButtonDefault = {
@@ -93,7 +105,13 @@ internal class GitStagePanel(private val tracker: GitStageTracker,
       IdeFocusManager.getInstance(project).getFocusedDescendantFor(this) != null
     }
     commitPanel.commitActionsPanel.setupShortcuts(this, this)
-    commitPanel.addEditedCommitListener(tree::editedCommitChanged, this)
+    commitPanel.addEditedCommitListener(_tree::editedCommitChanged, this)
+    commitPanel.includedRoots = _tree.getIncludedRoots()
+    _tree.addIncludedRootsListener(object : IncludedRootsListener {
+      override fun includedRootsChanged() {
+        commitPanel.includedRoots = _tree.getIncludedRoots()
+      }
+    }, this)
     commitWorkflowHandler = GitStageCommitWorkflowHandler(GitStageCommitWorkflow(project), commitPanel)
     Disposer.register(this, commitPanel)
 
@@ -139,6 +157,7 @@ internal class GitStagePanel(private val tracker: GitStageTracker,
     val busConnection = project.messageBus.connect(this)
     busConnection.subscribe(GitChangeProvider.TOPIC, MyGitChangeProviderListener())
     busConnection.subscribe(ChangeListListener.TOPIC, MyChangeListListener())
+    commitWorkflowHandler.workflow.addListener(MyCommitWorkflowListener(), this)
 
     if (GitVcs.getInstance(project).changeProvider?.isRefreshInProgress == true) {
       tree.setEmptyText(message("stage.loading.status"))
@@ -148,7 +167,7 @@ internal class GitStagePanel(private val tracker: GitStageTracker,
 
     Disposer.register(disposableParent, this)
 
-    runInEdtAsync(this, { tree.rebuildTree() })
+    runInEdtAsync(this) { update() }
   }
 
   private fun updateChangesStatusPanel() {
@@ -188,7 +207,7 @@ internal class GitStagePanel(private val tracker: GitStageTracker,
     if (!force && (isInEditor == (editorTabPreview != null))) return
 
     if (diffPreviewProcessor != null) Disposer.dispose(diffPreviewProcessor!!)
-    diffPreviewProcessor = GitStageDiffPreview(project, tree, tracker, this)
+    diffPreviewProcessor = GitStageDiffPreview(project, _tree, tracker, this)
     diffPreviewProcessor!!.getToolbarWrapper().setVerticalSizeReferent(toolbar.component)
 
     if (isInEditor) {
@@ -208,14 +227,31 @@ internal class GitStagePanel(private val tracker: GitStageTracker,
   override fun dispose() {
   }
 
-  private inner class MyChangesTree(project: Project) : GitStageTree(project, project.service<GitStageUiSettingsImpl>(), this) {
+  private inner class MyChangesTree(project: Project) : GitStageTree(project, project.service<GitStageUiSettingsImpl>(), this@GitStagePanel) {
     override val state
       get() = this@GitStagePanel.state
     override val ignoredFilePaths
       get() = this@GitStagePanel.tracker.ignoredPaths
     override val operations: List<StagingAreaOperation> = listOf(GitAddOperation, GitResetOperation)
 
+    private val includedRootsListeners = EventDispatcher.create(IncludedRootsListener::class.java)
+
     init {
+      setInclusionModel(GitStageRootInclusionModel(project, tracker, this@GitStagePanel))
+      groupingSupport.addPropertyChangeListener(PropertyChangeListener {
+        includedRootsListeners.multicaster.includedRootsChanged()
+      })
+      inclusionModel.addInclusionListener(object : InclusionListener {
+        override fun inclusionChanged() {
+          includedRootsListeners.multicaster.includedRootsChanged()
+        }
+      })
+      tracker.addListener(object : GitStageTrackerListener {
+        override fun update() {
+          includedRootsListeners.multicaster.includedRootsChanged()
+        }
+      }, this@GitStagePanel)
+
       doubleClickHandler = Processor { e ->
         if (EditSourceOnDoubleClickHandler.isToggleEvent(this, e)) return@Processor false
 
@@ -224,7 +260,7 @@ internal class GitStagePanel(private val tracker: GitStageTracker,
         val mergeAction = ActionManager.getInstance().getAction("Git.Stage.Merge")
         val event = AnActionEvent.createFromAnAction(mergeAction, e, ActionPlaces.UNKNOWN, dataContext)
         if (ActionUtil.lastUpdateAndCheckDumb(mergeAction, event, true)) {
-          ActionUtil.performActionDumbAwareWithCallbacks(mergeAction, event, dataContext)
+          performActionDumbAwareWithCallbacks(mergeAction, event)
         }
         else {
           OpenSourceUtil.openSourcesFrom(dataContext, true)
@@ -267,6 +303,64 @@ internal class GitStagePanel(private val tracker: GitStageTracker,
     override fun showMergeDialog(conflictedFiles: List<VirtualFile>) {
       AbstractVcsHelper.getInstance(project).showMergeDialog(conflictedFiles)
     }
+
+    fun getIncludedRoots(): Collection<VirtualFile> {
+      if (!isInclusionEnabled()) return state.rootStates.keys
+
+      return inclusionModel.getInclusion().mapNotNull { (it as? GitRepository)?.root }
+    }
+
+    fun addIncludedRootsListener(listener: IncludedRootsListener, disposable: Disposable) {
+      includedRootsListeners.addListener(listener, disposable)
+    }
+
+    private fun isInclusionEnabled(): Boolean {
+      return state.rootStates.size > 1 && state.stagedRoots.size > 1 &&
+             groupingSupport.isAvailable(REPOSITORY_GROUPING) &&
+             groupingSupport[REPOSITORY_GROUPING]
+    }
+
+    override fun isInclusionEnabled(node: ChangesBrowserNode<*>): Boolean {
+      return isInclusionEnabled() && node is RepositoryChangesBrowserNode && isUnderKind(node, NodeKind.STAGED)
+    }
+
+    override fun isInclusionVisible(node: ChangesBrowserNode<*>): Boolean {
+      return isInclusionEnabled() && node is RepositoryChangesBrowserNode && isUnderKind(node, NodeKind.STAGED)
+    }
+
+    override fun getIncludableUserObjects(treeModelData: VcsTreeModelData): MutableList<Any> {
+      return treeModelData
+        .rawNodesStream()
+        .filter { node: ChangesBrowserNode<*>? -> isIncludable(node!!) }
+        .map { node: ChangesBrowserNode<*> -> node.userObject }
+        .collect(Collectors.toList())
+    }
+
+    override fun getNodeStatus(node: ChangesBrowserNode<*>): ThreeStateCheckBox.State {
+      return inclusionModel.getInclusionState(node.userObject)
+    }
+
+    private fun isUnderKind(node: ChangesBrowserNode<*>, nodeKind: NodeKind): Boolean {
+      val nodePath = node.path?.takeIf { it.isNotEmpty() } ?: return false
+      return (nodePath.find { it is MyKindNode } as? MyKindNode)?.kind == nodeKind
+    }
+
+    override fun installGroupingSupport(): ChangesGroupingSupport {
+      val result = ChangesGroupingSupport(project, this, false)
+
+      if (PropertiesComponent.getInstance(project).getValues(GROUPING_PROPERTY_NAME) == null) {
+        val oldGroupingKeys = (PropertiesComponent.getInstance(project).getValues(GROUPING_KEYS) ?: DEFAULT_GROUPING_KEYS).toMutableSet()
+        oldGroupingKeys.add(REPOSITORY_GROUPING)
+        PropertiesComponent.getInstance(project).setValues(GROUPING_PROPERTY_NAME, *oldGroupingKeys.toTypedArray())
+      }
+
+      installGroupingSupport(this, result, GROUPING_PROPERTY_NAME, *DEFAULT_GROUPING_KEYS + REPOSITORY_GROUPING)
+      return result
+    }
+  }
+
+  interface IncludedRootsListener: EventListener {
+    fun includedRootsChanged()
   }
 
   private inner class MyGitStageTrackerListener : GitStageTrackerListener {
@@ -299,6 +393,25 @@ internal class GitStagePanel(private val tracker: GitStageTracker,
         updateChangesStatusPanel()
       }
     }
+  }
+
+  private inner class MyCommitWorkflowListener: CommitWorkflowListener {
+    override fun executionEnded() {
+      if (hasPendingUpdates) {
+        hasPendingUpdates = false
+        update()
+      }
+    }
+
+    override fun vcsesChanged() = Unit
+    override fun executionStarted() = Unit
+    override fun beforeCommitChecksStarted() = Unit
+    override fun beforeCommitChecksEnded(isDefaultCommit: Boolean, result: CheckinHandler.ReturnResult) = Unit
+  }
+
+  companion object {
+    @NonNls
+    private const val GROUPING_PROPERTY_NAME = "GitStage.ChangesTree.GroupingKeys"
   }
 }
 

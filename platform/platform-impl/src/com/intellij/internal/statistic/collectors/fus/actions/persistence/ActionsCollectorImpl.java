@@ -32,8 +32,12 @@ public class ActionsCollectorImpl extends ActionsCollector {
 
   @Override
   public void record(@Nullable String actionId, @Nullable InputEvent event, @NotNull Class context) {
+    recordCustomActionInvoked(null, actionId, event, context);
+  }
+
+  public static void recordCustomActionInvoked(@Nullable Project project, @Nullable String actionId, @Nullable InputEvent event, @NotNull Class context) {
     String recorded = StringUtil.isNotEmpty(actionId) && ourWhitelist.isCustomAllowedAction(actionId) ? actionId : DEFAULT_ID;
-    ActionsEventLogGroup.CUSTOM_ACTION_INVOKED.log(recorded, new FusInputEvent(event, null));
+    ActionsEventLogGroup.CUSTOM_ACTION_INVOKED.log(project, recorded, new FusInputEvent(event, null));
   }
 
   @Override
@@ -92,7 +96,12 @@ public class ActionsCollectorImpl extends ActionsCollector {
     if (action instanceof ActionWithDelegate) {
       Object delegate = ((ActionWithDelegate<?>)action).getDelegate();
       PluginInfo delegateInfo = PluginInfoDetectorKt.getPluginInfo(delegate.getClass());
-      actionId = delegateInfo.isSafeToReport() ? delegate.getClass().getName() : DEFAULT_ID;
+      if (delegate instanceof AnAction) {
+        AnAction delegateAction = (AnAction)delegate;
+        actionId = getActionId(delegateInfo, delegateAction);
+      } else {
+        actionId = delegateInfo.isSafeToReport() ? delegate.getClass().getName() : DEFAULT_ID;
+      }
       data.add(ActionsEventLogGroup.ACTION_CLASS.with(actionId));
       data.add(ActionsEventLogGroup.ACTION_PARENT.with(actionClassName));
     }

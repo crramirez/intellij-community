@@ -16,7 +16,6 @@ import com.intellij.openapi.fileTypes.FileTypeManager;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.module.impl.ModuleEx;
-import com.intellij.openapi.project.DumbModeTask;
 import com.intellij.openapi.project.DumbServiceImpl;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.*;
@@ -45,6 +44,7 @@ import com.intellij.util.indexing.FileBasedIndexImpl;
 import com.intellij.util.indexing.FileBasedIndexProjectHandler;
 import com.intellij.util.indexing.UnindexedFilesUpdater;
 import com.intellij.util.messages.MessageBusConnection;
+import com.intellij.workspaceModel.ide.WorkspaceModel;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -84,6 +84,10 @@ public class ProjectRootManagerComponent extends ProjectRootManagerImpl implemen
     if (!myProject.isDefault()) {
       registerListeners();
     }
+  }
+
+  @NotNull Set<LocalFileSystem.WatchRequest> getRootsToWatch() {
+    return myRootsToWatch;
   }
 
   private void registerListeners() {
@@ -240,13 +244,13 @@ public class ProjectRootManagerComponent extends ProjectRootManagerImpl implemen
     }
 
     // avoid creating empty unnecessary container
-    if (!flatPaths.isEmpty() || !excludedUrls.isEmpty()) {
+    if ((WorkspaceModel.isEnabled() && !excludedUrls.isEmpty()) ||
+        (!WorkspaceModel.isEnabled() && (!flatPaths.isEmpty() || !excludedUrls.isEmpty()))) {
       Disposer.register(this, disposable);
       // creating a container with these URLs with the sole purpose to get events to getRootsValidityChangedListener() when these roots change
       VirtualFilePointerContainer container =
         VirtualFilePointerManager.getInstance().createContainer(disposable, getRootsValidityChangedListener());
-
-      flatPaths.forEach(path -> container.add(VfsUtilCore.pathToUrl(path)));
+      if (!WorkspaceModel.isEnabled()) flatPaths.forEach(path -> container.add(VfsUtilCore.pathToUrl(path)));
       ((VirtualFilePointerContainerImpl)container).addAll(excludedUrls);
     }
 

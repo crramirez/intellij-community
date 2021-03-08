@@ -1,14 +1,16 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.projectRoots.impl.jdkDownloader
 
 import com.google.common.hash.Hashing
+import com.intellij.execution.process.ProcessOutput
 import com.intellij.execution.wsl.WSLCommandLineOptions
 import com.intellij.execution.wsl.WSLDistribution
 import com.intellij.execution.wsl.WslDistributionManager
+import com.intellij.execution.wsl.WslPath
 import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.components.*
 import com.intellij.openapi.diagnostic.ControlFlowException
-import com.intellij.openapi.diagnostic.logger
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.extensions.ExtensionPointName
 import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.progress.ProgressIndicator
@@ -17,6 +19,7 @@ import com.intellij.openapi.progress.util.RelayUiToDelegateIndicator
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectBundle
 import com.intellij.openapi.projectRoots.JdkUtil
+import com.intellij.openapi.projectRoots.impl.jdkDownloader.JdkInstallerWSL.unpackJdkOnWsl
 import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.util.registry.Registry
@@ -25,7 +28,6 @@ import com.intellij.util.io.*
 import com.intellij.util.xmlb.annotations.Tag
 import com.intellij.util.xmlb.annotations.XCollection
 import org.jetbrains.annotations.Nls
-import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -75,17 +77,46 @@ interface JdkInstallerListener {
 }
 
 @Service
-class JdkInstaller {
+class JdkInstaller : JdkInstallerBase() {
   companion object {
     @JvmStatic
     fun getInstance() = service<JdkInstaller>()
-
-    private val LOG = logger<JdkInstaller>()
   }
 
-  private operator fun File.div(path: String) = File(this, path).absoluteFile
+  override fun findHistoryRoots(feedItem: JdkItem): List<Path> = service<JdkInstallerStore>().findInstallations(feedItem)
 
-  @JvmOverloads fun defaultInstallDir(wslDistribution: WSLDistribution? = null) : Path {
+  override fun wslDistributionFromPath(targetDir: Path): WSLDistributionForJdkInstaller? {
+    val d = WslPath.getDistributionByWindowsUncPath(targetDir.toString()) ?: return null
+    return wrap(d)
+  }
+
+  private fun wrap(d: WSLDistribution) = WSLDistributionForJdkInstallerImpl(d)
+
+  private class WSLDistributionForJdkInstallerImpl(val d: WSLDistribution) : WSLDistributionForJdkInstaller {
+    override fun getWslPath(path: Path): String = d.getWslPath(path.toString()) ?: error("Failed to map $path to WSL")
+
+    override fun executeOnWsl(command: List<String>, dir: String, timeout: Int): ProcessOutput {
+      return d.executeOnWsl(command, WSLCommandLineOptions().setRemoteWorkingDirectory(dir), timeout, null)
+    }
+  }
+
+  override fun installJdkImpl(request: JdkInstallRequest, indicator: ProgressIndicator?, project: Project?) {
+    JDK_INSTALL_LISTENER_EP_NAME.forEachExtensionSafe { it.onJdkDownloadStarted(request, project) }
+    try {
+      super.installJdkImpl(request, indicator, project)
+      runCatching { service<JdkInstallerStore>().registerInstall(request.item, request.installDir) }
+    } finally {
+      JDK_INSTALL_LISTENER_EP_NAME.forEachExtensionSafe { it.onJdkDownloadFinished(request, project) }
+    }
+  }
+
+  override fun defaultInstallDir(wslDistribution: WSLDistributionForJdkInstaller?): Path {
+    if (wslDistribution is WSLDistributionForJdkInstallerImpl) return defaultInstallDir(wslDistribution.d)
+
+    return defaultInstallDir()
+  }
+
+  fun defaultInstallDir(wslDistribution: WSLDistribution?) : Path {
     wslDistribution?.let { dist ->
       dist.userHome?.let { home ->
         dist.getWindowsPath("$home/.jdks")?.let {
@@ -94,6 +125,10 @@ class JdkInstaller {
       }
     }
 
+    return defaultInstallDir()
+  }
+
+  override fun defaultInstallDir(): Path {
     val explicitHome = System.getProperty("jdk.downloader.home")
     if (explicitHome != null) {
       return Paths.get(explicitHome)
@@ -110,7 +145,27 @@ class JdkInstaller {
   }
 
   fun defaultInstallDir(newVersion: JdkItem, wslDistribution: WSLDistribution? = null) : Path {
-    val targetDir = defaultInstallDir(wslDistribution).resolve(newVersion.installFolderName)
+    return defaultInstallDir(defaultInstallDir(wslDistribution), newVersion)
+  }
+}
+
+interface WSLDistributionForJdkInstaller {
+  fun getWslPath(path: Path): String
+  fun executeOnWsl(command: List<String>, dir: String, timeout: Int): ProcessOutput
+}
+
+
+abstract class JdkInstallerBase {
+  @Suppress("PropertyName", "SSBasedInspection")
+  protected val LOG = Logger.getInstance(javaClass)
+
+  abstract fun defaultInstallDir() : Path
+  open fun defaultInstallDir(wslDistribution: WSLDistributionForJdkInstaller?) : Path = defaultInstallDir()
+
+  fun defaultInstallDir(newVersion: JdkItem) : Path = defaultInstallDir(defaultInstallDir(), newVersion)
+
+  protected fun defaultInstallDir(installDir: Path, newVersion: JdkItem) : Path {
+    val targetDir = installDir.resolve(newVersion.installFolderName)
     var count = 1
     var uniqueDir = targetDir
     while (uniqueDir.exists()) {
@@ -161,9 +216,7 @@ class JdkInstaller {
   /**
    * @see [JdkInstallRequest.javaHome] for the actual java home, it may not match the [JdkInstallRequest.installDir]
    */
-  private fun installJdkImpl(request: JdkInstallRequest, indicator: ProgressIndicator?, project: Project?) {
-    JDK_INSTALL_LISTENER_EP_NAME.forEachExtensionSafe { it.onJdkDownloadStarted(request, project) }
-
+  protected open fun installJdkImpl(request: JdkInstallRequest, indicator: ProgressIndicator?, project: Project?) {
     val item = request.item
     indicator?.text = ProjectBundle.message("progress.text.installing.jdk.1", item.fullPresentationText)
 
@@ -173,16 +226,13 @@ class JdkInstaller {
       error("URL must use https:// protocol, but was: $url")
     }
 
-    if (!item.archiveFileName.matches(Regex("[A-Za-z0-9._\\-+]+"))) {
-      error("Archive file name contains invalid characters: ${item.archiveFileName}")
-    }
-    val fullMatchPath = item.packageRootPrefix.removePrefix("./").trim('/')
-    if (!fullMatchPath.split('/').all { it.matches(Regex("[A-Za-z0-9._\\-+]*")) }) {
-      error("Package root prefix contains invalid characters: ${item.packageRootPrefix}")
+    val wslDistribution = wslDistributionFromPath(targetDir)
+    if (wslDistribution != null && item.os != "linux") {
+      error("Cannot install non-linux JDK into WSL environment to $targetDir from $item")
     }
 
     indicator?.text2 = ProjectBundle.message("progress.text2.downloading.jdk")
-    val downloadFile = Paths.get(PathManager.getTempPath(), "jdk-${System.nanoTime()}-${item.archiveFileName}")
+    val downloadFile = Paths.get(PathManager.getTempPath(), FileUtil.sanitizeFileName("jdk-${System.nanoTime()}-${item.archiveFileName}"))
     try {
       try {
         HttpRequests.request(item.url)
@@ -217,15 +267,15 @@ class JdkInstaller {
       indicator?.text2 = ProjectBundle.message("progress.text2.unpacking.jdk")
 
       try {
-        val wslDistribution = WslDistributionManager.getInstance().distributionFromPath(targetDir.toString())
         if (wslDistribution != null) {
-          unpackJdkOnWsl(wslDistribution, item.packageType, downloadFile, targetDir, fullMatchPath)
+          unpackJdkOnWsl(wslDistribution, item.packageType, downloadFile, targetDir, item.packageRootPrefix)
         }
         else {
           val decompressor = item.packageType.openDecompressor(downloadFile)
           //handle cancellation via postProcessor (instead of inheritance)
           decompressor.postProcessor { indicator?.checkCanceled() }
 
+          val fullMatchPath = item.packageRootPrefix.trim('/')
           if (fullMatchPath.isNotBlank()) {
             decompressor.removePrefixPath(fullMatchPath)
           }
@@ -233,7 +283,6 @@ class JdkInstaller {
         }
 
         runCatching { writeMarkerFile(request) }
-        runCatching { service<JdkInstallerStore>().registerInstall(item, targetDir) }
       }
       catch (t: Throwable) {
         if (t is ControlFlowException) throw t
@@ -248,35 +297,6 @@ class JdkInstaller {
     }
     finally {
       runCatching { FileUtil.delete(downloadFile) }
-      JDK_INSTALL_LISTENER_EP_NAME.forEachExtensionSafe { it.onJdkDownloadFinished(request, project) }
-    }
-  }
-
-  private fun unpackJdkOnWsl(wslDistribution: WSLDistribution,
-                             packageType: JdkPackageType,
-                             downloadFile: Path,
-                             targetDir: Path,
-                             packageRootPrefix: String) {
-    val downloadFileWslPath = wslDistribution.getWslPath(downloadFile.toString())
-    val targetWslPath = wslDistribution.getWslPath(targetDir.toString())
-    FileUtil.createDirectory(targetDir.toFile())
-
-    val command = when(packageType) {
-      JdkPackageType.ZIP -> listOf("unzip", downloadFileWslPath)
-      JdkPackageType.TAR_GZ -> listOf("tar", "xvzf", downloadFileWslPath)
-    }
-    val options = WSLCommandLineOptions().setRemoteWorkingDirectory(targetWslPath)
-    val processOutput = wslDistribution.executeOnWsl(command, options, 60_000, null)
-    if (processOutput.exitCode != 0) {
-      throw RuntimeException("Failed to unpack $downloadFile to $targetDir")
-    }
-    if (packageRootPrefix.isNotEmpty()) {
-      val mvCommand = "mv $targetWslPath/$packageRootPrefix/* $targetWslPath"
-      val mvOptions = WSLCommandLineOptions().setExecuteCommandInShell(false)
-      val mvProcessOutput = wslDistribution.executeOnWsl(listOf("sh", "-c", mvCommand), mvOptions, 60_000, null)
-      if (mvProcessOutput.exitCode != 0) {
-        throw RuntimeException("Failed to strip package root prefix ${packageRootPrefix}")
-      }
     }
   }
 
@@ -295,7 +315,7 @@ class JdkInstaller {
    */
   fun prepareJdkInstallation(jdkItem: JdkItem, targetPath: Path): JdkInstallRequest {
     if (Registry.`is`("jdk.downloader.reuse.installed")) {
-      val distribution = WslDistributionManager.getInstance().distributionFromPath(targetPath.toString())
+      val distribution = wslDistributionFromPath(targetPath)
       val existingRequest = findAlreadyInstalledJdk(jdkItem, distribution)
       if (existingRequest != null) return existingRequest
     }
@@ -360,7 +380,10 @@ class JdkInstaller {
     try {
       if (jdkPath == null) return null
       if (!jdkPath.isDirectory()) return null
-      val expectOs = if (WslDistributionManager.isWslPath(jdkPath.toString())) "linux" else JdkPredicate.currentOS
+      val predicate = when {
+        WslDistributionManager.isWslPath(jdkPath.toString()) -> JdkPredicate.forWSL()
+        else -> JdkPredicate.default()
+      }
 
       // Java package install dir have several folders up from it, e.g. Contents/Home on macOS
       val markerFile = generateSequence(jdkPath, { file -> file.parent })
@@ -370,22 +393,22 @@ class JdkInstaller {
                          .firstOrNull { it.isFile() } ?: return null
 
       val json = JdkListParser.readTree(markerFile.readBytes())
-      return JdkListParser.parseJdkItem(json, JdkPredicate.createInstance()).firstOrNull { it.os == expectOs }
+      return JdkListParser.parseJdkItem(json, predicate).firstOrNull()
     }
     catch (e: Throwable) {
       return null
     }
   }
 
-  private fun findAlreadyInstalledJdk(feedItem: JdkItem, distribution: WSLDistribution?) : JdkInstallRequest? {
+  private fun findAlreadyInstalledJdk(feedItem: JdkItem, distribution: WSLDistributionForJdkInstaller?) : JdkInstallRequest? {
     try {
       val localRoots = run {
-        val defaultInstallDir = defaultInstallDir()
+        val defaultInstallDir = defaultInstallDir(distribution)
         if (!defaultInstallDir.isDirectory()) return@run listOf()
-        Files.list(defaultInstallDir).use{ it.toList() }
+        Files.list(defaultInstallDir).use { it.toList() }
       }
 
-      val historyRoots = service<JdkInstallerStore>().findInstallations(feedItem)
+      val historyRoots = findHistoryRoots(feedItem)
       for (installDir in localRoots + historyRoots) {
         if (!installDir.isDirectory()) continue
 
@@ -393,8 +416,7 @@ class JdkInstaller {
         if (item != feedItem) continue
 
         val jdkHome = item.resolveJavaHome(installDir)
-        if (jdkHome.isDirectory() && JdkUtil.checkForJdk(jdkHome) &&
-            WslDistributionManager.getInstance().distributionFromPath(jdkHome.toString()) == distribution) {
+        if (jdkHome.isDirectory() && JdkUtil.checkForJdk(jdkHome) && wslDistributionFromPath(jdkHome) == distribution) {
           return LocallyFoundJdk(feedItem, installDir, jdkHome)
         }
       }
@@ -404,6 +426,9 @@ class JdkInstaller {
 
     return null
   }
+
+  protected open fun findHistoryRoots(feedItem: JdkItem): List<Path> = listOf()
+  protected open fun wslDistributionFromPath(targetDir: Path) : WSLDistributionForJdkInstaller? = null
 }
 
 private data class PendingJdkRequest(

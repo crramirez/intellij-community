@@ -12,6 +12,7 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.application.ReadActionProcessor;
 import com.intellij.openapi.application.ex.ApplicationEx;
+import com.intellij.openapi.application.ex.ApplicationManagerEx;
 import com.intellij.openapi.application.ex.ApplicationUtil;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.ExtensionPointName;
@@ -52,6 +53,7 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -90,15 +92,6 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
 
   public PsiSearchHelperImpl(@NotNull Project project) {
     myManager = PsiManagerEx.getInstanceEx(project);
-    myDumbService = DumbService.getInstance(myManager.getProject());
-  }
-
-  /**
-   * @deprecated Use {@link #PsiSearchHelperImpl(Project)}
-   */
-  @Deprecated
-  public PsiSearchHelperImpl(@NotNull PsiManagerEx psiManager) {
-    myManager = psiManager;
     myDumbService = DumbService.getInstance(myManager.getProject());
   }
 
@@ -181,6 +174,7 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
    * @deprecated use {@link PsiSearchHelperImpl#processElementsWithWord(SearchScope, String, short, EnumSet, String, SearchSession, TextOccurenceProcessor)} instead
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public boolean processElementsWithWord(@NotNull TextOccurenceProcessor processor,
                                          @NotNull SearchScope searchScope,
                                          @NotNull String text,
@@ -519,21 +513,30 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
   private void processVirtualFile(@NotNull VirtualFile vfile,
                                   @NotNull AtomicBoolean stopped,
                                   @NotNull Processor<? super PsiFile> localProcessor) throws ApplicationUtil.CannotRunReadActionException {
-    PsiFile file = ApplicationUtil.tryRunReadAction(() -> vfile.isValid() ? myManager.findFile(vfile) : null);
-    if (file != null && !(file instanceof PsiBinaryFile)) {
-      ApplicationUtil.tryRunReadAction(() -> {
+    // try to pre-cache virtual file content outside read action to avoid stalling EDT
+    if (!vfile.isDirectory() && !vfile.getFileType().isBinary()) {
+      try {
+        vfile.contentsToByteArray();
+      }
+      catch (IOException ignored) {
+      }
+    }
+    if (!ApplicationManagerEx.getApplicationEx().tryRunReadAction(() -> {
+      PsiFile file = vfile.isValid() ? myManager.findFile(vfile) : null;
+      if (file != null && !(file instanceof PsiBinaryFile)) {
         Project project = myManager.getProject();
         if (project.isDisposed()) throw new ProcessCanceledException();
         if (!DumbUtil.getInstance(project).mayUseIndices()) {
           throw ApplicationUtil.CannotRunReadActionException.create();
         }
 
-        List<PsiFile> psiRoots = file.getViewProvider().getAllFiles();
+        FileViewProvider provider = file.getViewProvider();
+        List<PsiFile> psiRoots = provider.getAllFiles();
         Set<PsiFile> processed = new HashSet<>(psiRoots.size() * 2, (float)0.5);
         for (PsiFile psiRoot : psiRoots) {
           ProgressManager.checkCanceled();
           assert psiRoot != null : "One of the roots of file " + file + " is null. All roots: " + psiRoots + "; ViewProvider: " +
-                                   file.getViewProvider() + "; Virtual file: " + file.getViewProvider().getVirtualFile();
+                                   provider + "; Virtual file: " + provider.getVirtualFile();
           if (!processed.add(psiRoot)) continue;
           if (!psiRoot.isValid()) {
             continue;
@@ -544,7 +547,9 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
             break;
           }
         }
-      });
+      }
+    })) {
+      throw ApplicationUtil.CannotRunReadActionException.create();
     }
   }
 
@@ -977,7 +982,7 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
       Set<VirtualFile> intersectionWithContainerNameFiles = intersectionWithContainerNameFiles(commonScope, processors, key);
       List<VirtualFile> allFilesForKeys = new ArrayList<>();
       processFilesContainingAllKeys(myManager.getProject(), commonScope, Processors.cancelableCollectProcessor(allFilesForKeys), key);
-      Object2IntOpenHashMap<VirtualFile> file2Mask = new Object2IntOpenHashMap<>();
+      Object2IntMap<VirtualFile> file2Mask=new Object2IntOpenHashMap<>();
       file2Mask.defaultReturnValue(-1);
       IntRef maskRef = new IntRef();
       for (VirtualFile file : allFilesForKeys) {
@@ -1214,7 +1219,7 @@ public class PsiSearchHelperImpl implements PsiSearchHelper {
                            @NotNull Set<Integer> trigrams,
                            @Nullable Short context,
                            boolean useOnlyWeakHashToSearch,
-                           Collection<String> initialWords) {
+                           @NotNull Collection<String> initialWords) {
       myIdIndexEntries = idIndexEntries;
       myTrigrams = trigrams;
       myContext = context;

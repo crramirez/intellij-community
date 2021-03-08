@@ -58,7 +58,8 @@ class UISettings @NonInjectable constructor(private val notRoamableOptions: NotR
   val animateWindows: Boolean
     get() = Registry.`is`("ide.animate.toolwindows", false)
 
-  @Deprecated("use StatusBarWidgetSettings#isEnabled(MemoryUsagePanel.WIDGET_ID)")
+  @get:Deprecated("use StatusBarWidgetSettings#isEnabled(MemoryUsagePanel.WIDGET_ID)")
+  @get:ScheduledForRemoval(inVersion = "2021.2")
   var showMemoryIndicator: Boolean
     get() = state.showMemoryIndicator
     set(value) {
@@ -217,14 +218,6 @@ class UISettings @NonInjectable constructor(private val notRoamableOptions: NotR
     get() = state.compactTreeIndents
     set(value) {
       state.compactTreeIndents = value
-    }
-
-  var moveMouseOnDefaultButton: Boolean
-    @ScheduledForRemoval(inVersion = "2020.3")
-    @Deprecated("Use registry key 'ide.settings.move.mouse.on.default.button'")
-    get() = state.moveMouseOnDefaultButton
-    set(value) {
-      state.moveMouseOnDefaultButton = value
     }
 
   var showMainToolbar: Boolean
@@ -547,7 +540,7 @@ class UISettings @NonInjectable constructor(private val notRoamableOptions: NotR
     }
 
     /**
-     * Returns the default font scale, which depends on the HiDPI mode (see JBUI#ScaleType).
+     * Returns the default font scale, which depends on the HiDPI mode (see [com.intellij.ui.scale.ScaleType]).
      * <p>
      * The font is represented:
      * - in relative (dpi-independent) points in the JRE-managed HiDPI mode, so the method returns 1.0f
@@ -557,7 +550,10 @@ class UISettings @NonInjectable constructor(private val notRoamableOptions: NotR
      */
     @JvmStatic
     val defFontScale: Float
-      get() = if (JreHiDpiUtil.isJreHiDPIEnabled()) 1f else JBUIScale.sysScale()
+      get() = when {
+        JreHiDpiUtil.isJreHiDPIEnabled() -> 1f
+        else -> JBUIScale.sysScale()
+      }
 
     /**
      * Returns the default font size scaled by #defFontScale
@@ -594,6 +590,7 @@ class UISettings @NonInjectable constructor(private val notRoamableOptions: NotR
 
   @Suppress("DeprecatedCallableAddReplaceWith")
   @Deprecated("Please use {@link UISettingsListener#TOPIC}")
+  @ScheduledForRemoval(inVersion = "2021.3")
   fun addUISettingsListener(listener: UISettingsListener, parentDisposable: Disposable) {
     ApplicationManager.getApplication().messageBus.connect(parentDisposable).subscribe(UISettingsListener.TOPIC, listener)
   }

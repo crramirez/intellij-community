@@ -59,7 +59,7 @@ public final class LightEditUtil {
     VirtualFile virtualFile = VfsUtil.findFile(path, true);
     if (virtualFile != null) {
       Project project = LightEditService.getInstance().openFile(virtualFile);
-      LightEditFeatureUsagesUtil.logFileOpen(CommandLine);
+      LightEditFeatureUsagesUtil.logFileOpen(project, CommandLine);
       return project;
     }
     else {
@@ -219,6 +219,13 @@ public final class LightEditUtil {
       throw new IllegalStateException("Missing LightEdit project");
     }
     return project;
+  }
+
+  public static void forbidServiceInLightEditMode(@Nullable Project project, @NotNull Class<?> serviceClass) {
+    if (LightEdit.owns(project)) {
+      LOG.error("LightEdit mode lacks tool windows, so " + serviceClass.getName() + " shouldn't be instantiated there. " +
+                "Please change the caller to avoid loading the service in LightEdit mode!");
+    }
   }
 
   @NotNull

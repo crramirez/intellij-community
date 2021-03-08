@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight.daemon.impl;
 
 import com.intellij.codeHighlighting.HighlightDisplayLevel;
@@ -56,6 +56,10 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
+import static com.intellij.codeInspection.ex.InspectListener.InspectionKind.LOCAL;
+import static com.intellij.codeInspection.ex.InspectListener.InspectionKind.LOCAL_PRIORITY;
+import static com.intellij.codeInspection.ex.InspectionEventsKt.reportWhenInspectionFinished;
+
 public class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass {
   private static final Logger LOG = Logger.getInstance(LocalInspectionsPass.class);
   public static final TextRange EMPTY_PRIORITY_RANGE = TextRange.EMPTY_RANGE;
@@ -63,6 +67,7 @@ public class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass
   private final TextRange myPriorityRange;
   private final boolean myIgnoreSuppressed;
   private final ConcurrentMap<PsiFile, List<InspectionResult>> result = new ConcurrentHashMap<>();
+  private final InspectListener myInspectTopicPublisher;
   private volatile List<HighlightInfo> myInfos = Collections.emptyList();
   private final String myShortcutText;
   private final SeverityRegistrar mySeverityRegistrar;
@@ -97,6 +102,7 @@ public class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass
     assert myProfileWrapper != null;
     mySeverityRegistrar = myProfileWrapper.getProfileManager().getSeverityRegistrar();
     myInspectInjectedPsi = inspectInjectedPsi;
+    myInspectTopicPublisher = myProject.getMessageBus().syncPublisher(GlobalInspectionContextEx.INSPECT_TOPIC);
 
     // initial guess
     setProgressLimit(300 * 2);
@@ -109,7 +115,9 @@ public class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass
   @Override
   protected void collectInformationWithProgress(@NotNull ProgressIndicator progress) {
     try {
-      if (!HighlightingLevelManager.getInstance(myProject).shouldInspect(getFile())) return;
+      if (!HighlightingLevelManager.getInstance(myProject).shouldInspect(getFile())) {
+        return;
+      }
       inspect(getInspectionTools(myProfileWrapper), InspectionManager.getInstance(myProject), true, progress);
     }
     finally {
@@ -136,10 +144,17 @@ public class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass
       for (ProblemDescriptor descriptor : inspectionResult.foundProblems) {
         if (descriptor.getHighlightType() == ProblemHighlightType.INFORMATION) {
           if (ourToolsWithInformationProblems.add(shortName)) {
-            LOG.error("Tool #" + shortName + " registers INFORMATION level problem in batch mode on " + getFile() + ". " +
-                      "INFORMATION level 'warnings' are invisible in the editor and should not become visible in batch mode. " +
-                      "Moreover, cause INFORMATION level fixes act more like intention actions, they could e.g. change semantics and " +
-                      "thus should not be suggested for batch transformations");
+            String message = "Tool #" + shortName + " registers INFORMATION level problem in batch mode on " + getFile() + ". " +
+                             "INFORMATION level 'warnings' are invisible in the editor and should not become visible in batch mode. " +
+                             "Moreover, cause INFORMATION level fixes act more like intention actions, they could e.g. change semantics and " +
+                             "thus should not be suggested for batch transformations";
+            LocalInspectionEP extension = toolWrapper.getExtension();
+            if (extension != null) {
+              LOG.error(new PluginException(message, extension.getPluginDescriptor().getPluginId()));
+            }
+            else {
+              LOG.error(message);
+            }
           }
           continue;
         }
@@ -192,7 +207,7 @@ public class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass
       InspectionEngine.filterToolsApplicableByLanguage(toolWrappers, InspectionEngine.calcElementDialectIds(inside, outside)),
       iManager, isOnTheFly, progress, inside, session);
     Set<PsiFile> alreadyVisitedInjected = inspectInjectedPsi(inside, isOnTheFly, progress, iManager, true, toolWrappers, Collections.emptySet());
-    visitRestElementsAndCleanup(progress, outside, session, init);
+    visitRestElementsAndCleanup(progress, outside, session, init, isOnTheFly);
     inspectInjectedPsi(outside, isOnTheFly, progress, iManager, false, toolWrappers, alreadyVisitedInjected);
     ProgressManager.checkCanceled();
 
@@ -262,7 +277,18 @@ public class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass
     PsiFile file = session.getFile();
     Processor<LocalInspectionToolWrapper> processor = toolWrapper ->
       AstLoadingFilter.disallowTreeLoading(() -> AstLoadingFilter.<Boolean, RuntimeException>forceAllowTreeLoading(file, () -> {
-        runToolOnElements(toolWrapper, iManager, isOnTheFly, indicator, elements, session, init);
+        if (elements.isEmpty() || isOnTheFly) {
+          runToolOnElements(toolWrapper, iManager, isOnTheFly, indicator, elements, session, init);
+        } else {
+          reportWhenInspectionFinished(
+            myInspectTopicPublisher,
+            toolWrapper,
+            LOCAL_PRIORITY,
+            () -> {
+              runToolOnElements(toolWrapper, iManager, false, indicator, elements, session, init);
+            });
+        }
+
         return true;
       }));
     if (!JobLauncher.getInstance().invokeConcurrentlyUnderProgress(wrappers, indicator, processor)) {
@@ -311,12 +337,24 @@ public class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass
   private void visitRestElementsAndCleanup(final @NotNull ProgressIndicator indicator,
                                            final @NotNull List<? extends PsiElement> elements,
                                            final @NotNull LocalInspectionToolSession session,
-                                           @NotNull List<? extends InspectionContext> init) {
+                                           @NotNull List<? extends InspectionContext> init,
+                                           final boolean isOnTheFly) {
+
     Processor<InspectionContext> processor =
       context -> {
         ProgressManager.checkCanceled();
         ApplicationManager.getApplication().assertReadAccessAllowed();
-        AstLoadingFilter.disallowTreeLoading(() -> InspectionEngine.acceptElements(elements, context.visitor));
+        if (isOnTheFly) {
+          AstLoadingFilter.disallowTreeLoading(() -> InspectionEngine.acceptElements(elements, context.visitor));
+        } else {
+          reportWhenInspectionFinished(
+            myInspectTopicPublisher,
+            context.tool,
+            LOCAL,
+            () -> {
+              AstLoadingFilter.disallowTreeLoading(() -> InspectionEngine.acceptElements(elements, context.visitor));
+            });
+        }
         advanceProgress(1);
         context.tool.getTool().inspectionFinished(session, context.holder);
 
@@ -545,7 +583,10 @@ public class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass
     if (!inspectionProfile.isToolEnabled(key, getFile())) return;
 
     HighlightInfoType type = new InspectionHighlightInfoType(level, element);
-    final String plainMessage = message.startsWith("<html>") ? StringUtil.unescapeXmlEntities(XmlStringUtil.stripHtml(message).replaceAll("<[^>]*>", "")) : message;
+    final String plainMessage = message.startsWith("<html>")
+                                ? StringUtil.unescapeXmlEntities(XmlStringUtil.stripHtml(message).replaceAll("<[^>]*>", ""))
+                                  .replaceAll("&nbsp;", " ")
+                                : message;
 
     @NlsSafe String tooltip = null;
     if (descriptor.showTooltip()) {

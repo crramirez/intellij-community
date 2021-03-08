@@ -1,4 +1,4 @@
-// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.vcs.log.ui;
 
 import com.google.common.util.concurrent.ListenableFuture;
@@ -9,7 +9,6 @@ import com.intellij.util.PairFunction;
 import com.intellij.vcs.log.VcsLog;
 import com.intellij.vcs.log.VcsLogUi;
 import com.intellij.vcs.log.impl.VcsLogUiProperties;
-import com.intellij.vcs.log.ui.table.GraphTableModel;
 import com.intellij.vcs.log.ui.table.VcsLogGraphTable;
 import com.intellij.vcs.log.visible.VisiblePack;
 import com.intellij.vcs.log.visible.VisiblePackRefresher;
@@ -54,13 +53,15 @@ public interface VcsLogUiEx extends VcsLogUi, Disposable {
    */
   @NotNull
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.2")
   default ListenableFuture<Boolean> jumpToHash(@NotNull String commitHash) {
     return ((ListenableFuture<Boolean>)getVcsLog().jumpToReference(commitHash));
   }
 
   @ApiStatus.Internal
   <T> void jumpTo(@NotNull T commitId,
-                  @NotNull PairFunction<GraphTableModel, T, Integer> rowGetter,
+                  @NotNull PairFunction<? super VisiblePack, ? super T, Integer> rowGetter,
                   @NotNull SettableFuture<? super Boolean> future,
-                  boolean silently);
+                  boolean silently,
+                  boolean focus);
 }

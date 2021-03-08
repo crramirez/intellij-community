@@ -34,6 +34,7 @@ import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.util.io.IoTestUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.*;
+import com.intellij.openapi.wm.impl.status.EncodingPanel;
 import com.intellij.psi.PsiDirectory;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
@@ -1169,10 +1170,10 @@ public class FileEncodingTest extends HeavyPlatformTestCase implements TestDialo
       }
 
       @Override
-      public @NotNull CharsetHint getCharsetHint() {
-        return new CharsetHint.ForcedCharset(StandardCharsets.ISO_8859_1);
+      public String getCharset(@NotNull VirtualFile file, final byte @NotNull [] content) {
+        return StandardCharsets.ISO_8859_1.name();
       }
-    };
+    }
     TestFileType fileType = new TestFileType();
     FileEncodingProvider encodingProvider = new FileEncodingProvider() {
       @Override
@@ -1216,5 +1217,18 @@ public class FileEncodingTest extends HeavyPlatformTestCase implements TestDialo
 
     disposeOnTearDown(() -> FileUtil.delete(file));
     return getVirtualFile(file);
+  }
+
+  public void testEncodingWidgetMustBeAvailableForReadonlyFiles() {
+    EncodingPanel panel = new EncodingPanel(getProject()){
+      @Override
+      protected VirtualFile getSelectedFile() {
+        LightVirtualFile file = new LightVirtualFile("x.txt", "xxx");
+        file.setWritable(false);
+        return file;
+      }
+    };
+    panel.updateInTests(true);
+    assertTrue(panel.isActionEnabled());
   }
 }

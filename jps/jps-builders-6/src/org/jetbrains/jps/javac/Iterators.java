@@ -22,7 +22,7 @@ public class Iterators {
     return isEmptyCollection(iterable) || !iterable.iterator().hasNext();
   }
 
-  private static boolean isEmptyCollection(Iterable<?> iterable) {
+  public static boolean isEmptyCollection(Iterable<?> iterable) {
     return iterable == null || iterable instanceof Collection && ((Collection<?>)iterable).isEmpty();
   }
 
@@ -78,12 +78,12 @@ public class Iterators {
     };
   }
 
-  public static <T> Iterable<T> flat(final Collection<? extends Iterable<T>> parts) {
+  public static <T> Iterable<T> flat(final Collection<? extends Iterable<? extends T>> parts) {
     if (parts.isEmpty()) {
       return Collections.emptyList();
     }
     if (parts.size() == 1) {
-      return parts.iterator().next();
+      return (Iterable<T>)parts.iterator().next();
     }
     return flat((Iterable<? extends Iterable<? extends T>>)parts);
   }
@@ -149,19 +149,18 @@ public class Iterators {
 
   public static <T> Iterator<T> asIterator(final T elem) {
     return new BaseIterator<T>() {
-      T _elem = elem;
+      private boolean available = true;
 
       @Override
       public boolean hasNext() {
-        return _elem != null;
+        return available;
       }
 
       @Override
       public T next() {
-        T element = _elem;
-        if (element != null) {
-          _elem = null;
-          return element;
+        if (available) {
+          available = false;
+          return elem;
         }
         throw new NoSuchElementException();
       }
@@ -247,7 +246,7 @@ public class Iterators {
     };
   }
 
-  public static <T> Iterable<T> filterWithOrder(final Iterable<? extends T> from, final Iterable<BooleanFunction<? super T>> predicates) {
+  public static <T> Iterable<T> filterWithOrder(final Iterable<? extends T> from, final Iterable<? extends BooleanFunction<? super T>> predicates) {
     return isEmptyCollection(predicates) || isEmptyCollection(from)? Collections.<T>emptyList() : new Iterable<T>() {
       @NotNull
       @Override
@@ -257,7 +256,7 @@ public class Iterators {
     };
   }
 
-  public static <T> Iterator<T> filterWithOrder(final Iterator<? extends T> from, final Iterator<BooleanFunction<? super T>> predicates) {
+  public static <T> Iterator<T> filterWithOrder(final Iterator<? extends T> from, final Iterator<? extends BooleanFunction<? super T>> predicates) {
     return flat(map(predicates, new Function<BooleanFunction<? super T>, Iterator<T>>() {
       final List<T> buffer = new LinkedList<T>();
       @Override

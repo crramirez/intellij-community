@@ -30,7 +30,7 @@ import com.intellij.util.FontUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.update.ComparableObject;
 import com.intellij.util.ui.update.ComparableObjectCheck;
-import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -80,15 +80,6 @@ public class PresentationData implements ColoredItemPresentation, ComparableObje
     myLocationString = locationString;
     myPresentableText = presentableText;
     myAttributesKey = attributesKey;
-  }
-
-  /**
-   * @deprecated Use {@link #PresentationData(String, String, Icon, TextAttributesKey)} instead.
-   */
-  @Deprecated
-  public PresentationData(@Nls String presentableText, String locationString, Icon openIcon, Icon closedIcon,
-                          @Nullable TextAttributesKey attributesKey) {
-    this(presentableText, locationString, closedIcon, attributesKey);
   }
 
 
@@ -154,6 +145,7 @@ public class PresentationData implements ColoredItemPresentation, ComparableObje
    *             in a non-tree view.
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public void setClosedIcon(Icon closedIcon) {
     setIcon(closedIcon);
   }
@@ -166,6 +158,7 @@ public class PresentationData implements ColoredItemPresentation, ComparableObje
    *             Sets the icon shown for the node when it is expanded in the tree.
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public void setOpenIcon(Icon openIcon) {
   }
 
@@ -178,6 +171,7 @@ public class PresentationData implements ColoredItemPresentation, ComparableObje
    */
 
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.2")
   public void setIcons(Icon icon) {
     setIcon(icon);
   }

@@ -30,6 +30,7 @@ import com.jetbrains.python.sdk.configuration.PySdkConfigurationCollector.Compan
 import com.jetbrains.python.sdk.configuration.PySdkConfigurationCollector.Companion.InputData
 import com.jetbrains.python.sdk.configuration.PySdkConfigurationCollector.Companion.Source
 import com.jetbrains.python.sdk.flavors.CondaEnvSdkFlavor
+import com.jetbrains.python.sdk.flavors.VirtualEnvSdkFlavor
 import com.jetbrains.python.sdk.flavors.listCondaEnvironments
 import com.jetbrains.python.sdk.flavors.runConda
 import java.awt.BorderLayout
@@ -41,12 +42,10 @@ class PyEnvironmentYmlSdkConfiguration : PyProjectSdkConfigurationExtension {
 
   private val LOGGER = Logger.getInstance(PyEnvironmentYmlSdkConfiguration::class.java)
 
-  override fun isApplicable(module: Module): Boolean = getEnvironmentYml(module) != null
-
   override fun createAndAddSdkForConfigurator(module: Module): Sdk? = createAndAddSdk(module, Source.CONFIGURATOR)
 
-  override fun getIntentionName(module: Module): @IntentionName String {
-    return PyCharmCommunityCustomizationBundle.message("sdk.create.condaenv.suggestion")
+  override fun getIntention(module: Module): @IntentionName String? = getEnvironmentYml(module)?.let {
+    PyCharmCommunityCustomizationBundle.message("sdk.create.condaenv.suggestion")
   }
 
   override fun createAndAddSdkForInspection(module: Module): Sdk? = createAndAddSdk(module, Source.INSPECTION)
@@ -157,7 +156,7 @@ class PyEnvironmentYmlSdkConfiguration : PyProjectSdkConfigurationExtension {
       }
     } ?: return null
 
-    val paths = CondaEnvSdkFlavor.findInRootDirectory(LocalFileSystem.getInstance().refreshAndFindFileByPath(rootDir))
+    val paths = VirtualEnvSdkFlavor.findInRootDirectory(LocalFileSystem.getInstance().refreshAndFindFileByPath(rootDir))
     return paths.singleOrNull().also {
       PySdkConfigurationCollector.logCondaEnv(
         project,

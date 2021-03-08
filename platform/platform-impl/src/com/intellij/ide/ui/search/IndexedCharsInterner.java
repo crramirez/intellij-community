@@ -5,7 +5,6 @@ import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.OpenTHashSet;
-import com.intellij.util.text.ByteArrayCharSequence;
 import com.intellij.util.text.CharSequenceHashingStrategy;
 import org.jetbrains.annotations.NotNull;
 
@@ -17,13 +16,13 @@ import org.jetbrains.annotations.NotNull;
 final class IndexedCharsInterner {
   private int[] idToIndex = new int[10];
 
-  private final OpenTHashSet<CharSequence> mySet = new OpenTHashSet<CharSequence>(10, 0.9f, CharSequenceHashingStrategy.CASE_SENSITIVE) {
+  private final OpenTHashSet<CharSequence> mySet = new OpenTHashSet<>(10, 0.9f, CharSequenceHashingStrategy.CASE_SENSITIVE) {
     @Override
     protected void rehash(int newCapacity) {
       Object[] oldSet = _set;
       int oldSize = mySet.size();
       super.rehash(newCapacity);
-      for (int i = 0; i < oldSize-1; i++) {
+      for (int i = 0; i < oldSize - 1; i++) {
         int oldIndex = idToIndex[i];
         CharSequence oldString = (CharSequence)oldSet[oldIndex];
         int newIndex = index(oldString);
@@ -34,13 +33,12 @@ final class IndexedCharsInterner {
   };
 
   public int toId(@NotNull String name) {
-    CharSequence seq = ByteArrayCharSequence.convertToBytesIfPossible(name);
-    int index = mySet.index(seq);
+    int index = mySet.index(name);
     int id;
     if (index == -1) {
       id = mySet.size();
-      mySet.add(seq);
-      index = mySet.index(seq);
+      mySet.add(name);
+      index = mySet.index(name);
       assert index != -1;
       if (id >= idToIndex.length) {
         idToIndex = ArrayUtil.realloc(idToIndex, idToIndex.length * 3 / 2);

@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.refactoring.rename.inplace;
 
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer;
@@ -29,6 +29,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.*;
 import com.intellij.openapi.editor.colors.EditorColors;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
+import com.intellij.openapi.editor.colors.TextAttributesKey;
 import com.intellij.openapi.editor.ex.EditorEx;
 import com.intellij.openapi.editor.ex.util.EditorUtil;
 import com.intellij.openapi.editor.impl.EditorImpl;
@@ -276,7 +277,7 @@ public abstract class InplaceRefactoring {
   protected Collection<PsiReference> collectRefs(SearchScope referencesSearchScope) {
     final Query<PsiReference> search = ReferencesSearch.search(myElementToRename, referencesSearchScope, false);
 
-    final CommonProcessors.CollectProcessor<PsiReference> processor = new CommonProcessors.CollectProcessor<PsiReference>() {
+    final CommonProcessors.CollectProcessor<PsiReference> processor = new CommonProcessors.CollectProcessor<>() {
       @Override
       protected boolean accept(PsiReference reference) {
         return acceptReference(reference);
@@ -305,7 +306,7 @@ public abstract class InplaceRefactoring {
     boolean subrefOnPrimaryElement = false;
     boolean hasReferenceOnNameIdentifier = false;
     for (PsiReference ref : refs) {
-      if (isReferenceAtCaret(selectedElement, ref)) {
+      if (isReferenceAtCaret(selectedElement, ref, offset)) {
         Expression expression = createTemplateExpression(selectedElement);
         builder.replaceElement(ref.getElement(), getRangeToRename(ref), PRIMARY_VARIABLE_NAME, expression,
                                shouldStopAtLookupExpression(expression));
@@ -370,12 +371,20 @@ public abstract class InplaceRefactoring {
     return expression instanceof MyLookupExpression;
   }
 
+  /**
+   * Checks if selected element contains reference range and covers current offset as well
+   */
+  protected boolean isReferenceAtCaret(PsiElement selectedElement, PsiReference ref, int offset) {
+    return isReferenceAtCaret(selectedElement, ref) && 
+           checkRangeContainsOffset(offset, ref.getRangeInElement(), ref.getElement());
+  }
+
   protected boolean isReferenceAtCaret(PsiElement selectedElement, PsiReference ref) {
     final TextRange textRange = ref.getRangeInElement().shiftRight(ref.getElement().getTextRange().getStartOffset());
     if (selectedElement != null){
       final TextRange selectedElementRange = selectedElement.getTextRange();
       LOG.assertTrue(selectedElementRange != null, selectedElement);
-      if (selectedElementRange != null && selectedElementRange.contains(textRange)) return true;
+      if (selectedElementRange.contains(textRange)) return true;
     }
     return false;
   }
@@ -407,7 +416,7 @@ public abstract class InplaceRefactoring {
     topLevelEditor.getCaretModel().moveToOffset(rangeMarker.getStartOffset());
 
     TemplateManager.getInstance(myProject).startTemplate(topLevelEditor, template, templateListener);
-    restoreOldCaretPositionAndSelection(offset);
+    restoreOldCaretPositionAndSelection(myEditor, restoreCaretOffset(offset), this::restoreSelection);
     highlightTemplateVariables(template, topLevelEditor);
 
     final TemplateState templateState = TemplateManagerImpl.getTemplateState(topLevelEditor);
@@ -419,37 +428,57 @@ public abstract class InplaceRefactoring {
   private void highlightTemplateVariables(Template template, Editor topLevelEditor) {
     //add highlights
     if (myHighlighters != null) { // can be null if finish is called during testing
-      Map<TextRange, TextAttributes> rangesToHighlight = new HashMap<>();
       final TemplateState templateState = TemplateManagerImpl.getTemplateState(topLevelEditor);
-      if (templateState != null) {
+      Map<TextRange, TextAttributes> rangesToHighlight;
+      if (templateState == null) {
+        rangesToHighlight = Collections.emptyMap();
+      }
+      else {
         EditorColorsManager colorsManager = EditorColorsManager.getInstance();
-        for (int i = 0; i < templateState.getSegmentsCount(); i++) {
-          final TextRange segmentOffset = templateState.getSegmentRange(i);
-          final String name = template.getSegmentName(i);
-          TextAttributes attributes = null;
-          if (name.equals(PRIMARY_VARIABLE_NAME)) {
-            attributes = colorsManager.getGlobalScheme().getAttributes(EditorColors.WRITE_SEARCH_RESULT_ATTRIBUTES);
+        rangesToHighlight = new HashMap<>();
+        variableHighlights(template, templateState).forEach((range, attributesKey) -> {
+          TextAttributes attributes = colorsManager.getGlobalScheme().getAttributes(attributesKey);
+          if (attributes != null) {
+            rangesToHighlight.put(range, attributes);
           }
-          else if (name.equals(OTHER_VARIABLE_NAME)) {
-            attributes = colorsManager.getGlobalScheme().getAttributes(EditorColors.SEARCH_RESULT_ATTRIBUTES);
-          }
-          if (attributes == null) continue;
-          rangesToHighlight.put(segmentOffset, attributes);
-        }
+        });
       }
       addHighlights(rangesToHighlight, topLevelEditor, myHighlighters, HighlightManager.getInstance(myProject));
     }
   }
 
-  private void restoreOldCaretPositionAndSelection(final int offset) {
+  @NotNull
+  static Map<TextRange, TextAttributesKey> variableHighlights(@NotNull Template template, @NotNull TemplateState templateState) {
+    final Map<TextRange, TextAttributesKey> rangesToHighlight = new HashMap<>();
+    for (int i = 0; i < templateState.getSegmentsCount(); i++) {
+      final TextRange segmentOffset = templateState.getSegmentRange(i);
+      final String name = template.getSegmentName(i);
+      final TextAttributesKey attributesKey;
+      if (name.equals(PRIMARY_VARIABLE_NAME)) {
+        attributesKey = EditorColors.WRITE_SEARCH_RESULT_ATTRIBUTES;
+      }
+      else if (name.equals(OTHER_VARIABLE_NAME)) {
+        attributesKey = EditorColors.SEARCH_RESULT_ATTRIBUTES;
+      }
+      else {
+        continue;
+      }
+      rangesToHighlight.put(segmentOffset, attributesKey);
+    }
+    return rangesToHighlight;
+  }
+
+  static void restoreOldCaretPositionAndSelection(@NotNull Editor editor,
+                                                  int restoredCaretOffset,
+                                                  @NotNull Runnable restoreSelection) {
     //move to old offset
     Runnable runnable = () -> {
-      myEditor.getCaretModel().moveToOffset(restoreCaretOffset(offset));
-      restoreSelection();
+      editor.getCaretModel().moveToOffset(restoredCaretOffset);
+      restoreSelection.run();
     };
 
-    final LookupImpl lookup = (LookupImpl)LookupManager.getActiveLookup(myEditor);
-    if (lookup != null && lookup.getLookupStart() <= (restoreCaretOffset(offset))) {
+    final LookupImpl lookup = (LookupImpl)LookupManager.getActiveLookup(editor);
+    if (lookup != null && lookup.getLookupStart() <= restoredCaretOffset) {
       lookup.setLookupFocusDegree(LookupFocusDegree.UNFOCUSED);
       lookup.performGuardedChange(runnable);
     }
@@ -553,16 +582,24 @@ public abstract class InplaceRefactoring {
 
   @Nullable
   protected StartMarkAction startRename() throws StartMarkAction.AlreadyStartedException {
+    return startMarkAction(myProject, myEditor, getCommandName());
+  }
+
+  static @NotNull StartMarkAction startMarkAction(
+    @NotNull Project project,
+    @NotNull Editor editor,
+    @NlsContexts.Command String commandName
+  ) throws StartMarkAction.AlreadyStartedException {
     final StartMarkAction[] markAction = new StartMarkAction[1];
     final StartMarkAction.AlreadyStartedException[] ex = new StartMarkAction.AlreadyStartedException[1];
-    CommandProcessor.getInstance().executeCommand(myProject, () -> {
+    CommandProcessor.getInstance().executeCommand(project, () -> {
       try {
-        markAction[0] = StartMarkAction.start(myEditor, myProject, getCommandName());
+        markAction[0] = StartMarkAction.start(editor, project, commandName);
       }
       catch (StartMarkAction.AlreadyStartedException e) {
         ex[0] = e;
       }
-    }, getCommandName(), null);
+    }, commandName, null);
     if (ex[0] != null) throw ex[0];
     return markAction[0];
   }
@@ -877,7 +914,7 @@ public abstract class InplaceRefactoring {
 
   protected void showBalloonInEditor() {
     final JBPopupFactory popupFactory = JBPopupFactory.getInstance();
-    myBalloon.show(new PositionTracker<Balloon>(myEditor.getContentComponent()) {
+    myBalloon.show(new PositionTracker<>(myEditor.getContentComponent()) {
       @Override
       public RelativePoint recalculateLocation(@NotNull Balloon object) {
         if (myTarget != null && !popupFactory.isBestPopupLocationVisible(myEditor)) {

@@ -14,10 +14,11 @@ import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.colors.ColorKey
 import com.intellij.openapi.editor.markup.InspectionWidgetActionProvider
 import com.intellij.openapi.fileEditor.FileEditor
-import com.intellij.openapi.fileEditor.impl.text.PsiAwareTextEditorImpl
+import com.intellij.openapi.fileEditor.TextEditor
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.DumbAwareToggleAction
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.isNotificationSilentMode
 import com.intellij.openapi.ui.popup.JBPopupListener
 import com.intellij.openapi.ui.popup.LightweightWindowEvent
 import com.intellij.openapi.util.SystemInfo
@@ -97,7 +98,7 @@ private class ReaderModeActionProvider : InspectionWidgetActionProvider {
         }
 
         editor.project?.let { p ->
-          if (!ReaderModeSettings.instance(p).enabled) return@let
+          if (!ReaderModeSettings.instance(p).enabled || isNotificationSilentMode(p)) return@let
 
           val connection = p.messageBus.connect(p)
           val gotItTooltip = GotItTooltip("reader.mode.got.it", LangBundle.message("text.reader.mode.got.it.popup"), p)
@@ -105,8 +106,8 @@ private class ReaderModeActionProvider : InspectionWidgetActionProvider {
 
           if (gotItTooltip.canShow()) {
             connection.subscribe(DaemonCodeAnalyzer.DAEMON_EVENT_TOPIC, object : DaemonCodeAnalyzer.DaemonListener {
-              override fun daemonFinished(fileEditors: MutableCollection<out FileEditor>) {
-                fileEditors.find { fe -> if (fe is PsiAwareTextEditorImpl) editor == fe.editor else false }?.let { _ ->
+              override fun daemonFinished(fileEditors: Collection<FileEditor>) {
+                fileEditors.find { fe -> (fe is TextEditor) && editor == fe.editor }?.let { _ ->
                   gotItTooltip.setOnBalloonCreated { balloon ->
                     balloon.addListener(object: JBPopupListener {
                       override fun onClosed(event: LightweightWindowEvent) {

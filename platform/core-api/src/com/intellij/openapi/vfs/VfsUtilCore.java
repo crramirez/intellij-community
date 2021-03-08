@@ -20,6 +20,7 @@ import com.intellij.util.Processor;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.DistinctRootsCollection;
 import com.intellij.util.io.URLUtil;
+import com.intellij.util.text.CharArrayUtil;
 import org.jetbrains.annotations.*;
 
 import java.io.*;
@@ -41,6 +42,8 @@ public class VfsUtilCore {
   public static final @NonNls String LOCALHOST_URI_PATH_PREFIX = "localhost/";
   public static final char VFS_SEPARATOR_CHAR = '/';
   public static final String VFS_SEPARATOR = "/";
+
+  private static final String PROTOCOL_DELIMITER = ":";
 
   /**
    * @param strict if {@code false} then this method returns {@code true} if {@code ancestor} and {@code file} are equal
@@ -476,15 +479,30 @@ public class VfsUtilCore {
   }
 
   public static @NotNull String convertFromUrl(@NotNull URL url) {
-    try {
-      return URLUtil.convertFromUrl(url);
+    String protocol = url.getProtocol();
+    String path = url.getPath();
+    if (protocol.equals(URLUtil.JAR_PROTOCOL)) {
+      if (StringUtil.startsWithConcatenation(path, URLUtil.FILE_PROTOCOL, PROTOCOL_DELIMITER)) {
+        try {
+          URL subURL = new URL(path);
+          path = subURL.getPath();
+        }
+        catch (MalformedURLException e) {
+          throw new RuntimeException(CoreBundle.message("url.parse.unhandled.exception"), e);
+        }
+      }
+      else {
+        throw new RuntimeException(new IOException(CoreBundle.message("url.parse.error", url.toExternalForm())));
+      }
     }
-    catch (MalformedURLException e) {
-      throw new RuntimeException(CoreBundle.message("url.parse.unhandled.exception"), e);
+    if (SystemInfoRt.isWindows) {
+      while (!path.isEmpty() && path.charAt(0) == '/') {
+        path = path.substring(1);
+      }
     }
-    catch (IOException e) {
-      throw new RuntimeException(new IOException(CoreBundle.message("url.parse.error", url.toExternalForm())));
-    }
+
+    path = URLUtil.unescapePercentSequences(path);
+    return protocol + "://" + path;
   }
 
   /**
@@ -714,16 +732,17 @@ public class VfsUtilCore {
     path = FileUtil.toCanonicalPath(path);
     int li = path.length();
     while (file != null && li != -1) {
-      int i = path.lastIndexOf('/', li-1);
+      int sepIndex = path.lastIndexOf('/', li - 1);
       CharSequence fileName = file.getNameSequence();
-      if (StringUtil.endsWithChar(fileName, '/')) {
-        fileName = fileName.subSequence(0, fileName.length()-1);
+      int fileNameEnd = fileName.length() + (StringUtil.endsWithChar(fileName, '/') ? -1 : 0);
+      if (sepIndex == 6 && StringUtil.startsWith(fileName, "//wsl$")) {
+        sepIndex = -1;
       }
-      if (!StringUtilRt.equal(fileName, path.substring(i + 1, li), file.isCaseSensitive())) {
+      if (!CharArrayUtil.regionMatches(fileName, 0, fileNameEnd, path, sepIndex + 1, li, file.isCaseSensitive())) {
         return false;
       }
       file = file.getParent();
-      li = i;
+      li = sepIndex;
     }
     return li == -1 && file == null;
   }

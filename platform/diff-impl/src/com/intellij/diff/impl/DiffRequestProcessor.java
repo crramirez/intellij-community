@@ -666,7 +666,7 @@ public abstract class DiffRequestProcessor implements Disposable {
     public void actionPerformed(@NotNull AnActionEvent e) {
       if (myState.getActiveTool() == myDiffTool) return;
 
-      DiffUsageTriggerCollector.trigger("toggle.diff.tool", myDiffTool, myContext.getUserData(DiffUserDataKeys.PLACE));
+      DiffUsageTriggerCollector.trigger(e.getProject(), "toggle.diff.tool", myDiffTool, myContext.getUserData(DiffUserDataKeys.PLACE));
       moveToolOnTop(myDiffTool);
 
       updateRequest(true);
@@ -1237,7 +1237,12 @@ public abstract class DiffRequestProcessor implements Disposable {
     @Override
     @RequiresEdt
     public void destroy() {
-      Disposer.dispose(myViewer);
+      try {
+        Disposer.dispose(myViewer);
+      }
+      catch (Throwable e) {
+        LOG.error(e);
+      }
     }
 
     @Nullable
@@ -1288,7 +1293,12 @@ public abstract class DiffRequestProcessor implements Disposable {
     @Override
     @RequiresEdt
     public void destroy() {
-      Disposer.dispose(myViewer);
+      try {
+        Disposer.dispose(myViewer);
+      }
+      catch (Throwable e) {
+        LOG.error(e);
+      }
     }
 
     @Nullable
@@ -1366,8 +1376,13 @@ public abstract class DiffRequestProcessor implements Disposable {
     @Override
     @RequiresEdt
     public void destroy() {
-      Disposer.dispose(myViewer);
-      Disposer.dispose(myWrapperViewer);
+      try {
+        Disposer.dispose(myViewer);
+        Disposer.dispose(myWrapperViewer);
+      }
+      catch (Throwable e) {
+        LOG.error(e);
+      }
     }
 
     @Nullable

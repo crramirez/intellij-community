@@ -5,16 +5,13 @@ import com.intellij.ide.projectView.ProjectViewNodeDecorator;
 import com.intellij.openapi.project.Project;
 import com.intellij.ui.ColoredTreeCellRenderer;
 import com.intellij.ui.SimpleTextAttributes;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 public abstract class AbstractCoverageProjectViewNodeDecorator implements ProjectViewNodeDecorator {
   private Project myProject;
-
-  @Deprecated
-  public AbstractCoverageProjectViewNodeDecorator(@SuppressWarnings("unused") @Nullable CoverageDataManager coverageDataManager) {
-  }
 
   public AbstractCoverageProjectViewNodeDecorator(@NotNull Project project) {
     myProject = project;
@@ -26,6 +23,7 @@ public abstract class AbstractCoverageProjectViewNodeDecorator implements Projec
    */
   @Nullable
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   protected final CoverageDataManager getCoverageDataManager() {
     return getCoverageDataManager(myProject);
   }

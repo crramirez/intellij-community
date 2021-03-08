@@ -1,8 +1,9 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.intellij.build.impl
 
 import com.intellij.openapi.util.Pair
 import com.intellij.openapi.util.io.FileUtil
+import com.intellij.openapi.util.text.StringUtil
 import com.intellij.util.containers.MultiMap
 import com.jetbrains.plugin.blockmap.core.BlockMap
 import com.jetbrains.plugin.blockmap.core.FileHash
@@ -66,6 +67,7 @@ final class DistributionJARsBuilder {
   final PlatformLayout platform
   private final Path patchedApplicationInfo
   private final LinkedHashSet<PluginLayout> pluginsToPublish
+  private final PluginXmlPatcher pluginXmlPatcher
 
   @CompileStatic(TypeCheckingMode.SKIP)
   DistributionJARsBuilder(BuildContext buildContext,
@@ -74,6 +76,12 @@ final class DistributionJARsBuilder {
     this.patchedApplicationInfo = patchedApplicationInfo
     this.buildContext = buildContext
     this.pluginsToPublish = filterPluginsToPublish(pluginsToPublish)
+
+    def releaseDate = buildContext.applicationInfo.majorReleaseDate ?:
+                      ZonedDateTime.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("uuuuMMdd"))
+    def releaseVersion = "${buildContext.applicationInfo.majorVersion}${buildContext.applicationInfo.minorVersionMainPart}00"
+    this.pluginXmlPatcher = new PluginXmlPatcher(buildContext.messages, releaseDate, releaseVersion, buildContext.applicationInfo.productName, buildContext.applicationInfo.isEAP)
+
     buildContext.ant.patternset(id: RESOURCES_INCLUDED) {
       include(name: "**/*Bundle*.properties")
       include(name: "**/*Messages.properties")
@@ -285,7 +293,6 @@ final class DistributionJARsBuilder {
       SVGPreBuilder.createPrebuildSvgIconsTask(),
       createBuildSearchableOptionsTask(getModulesForPluginsToPublish()),
       createBuildBrokenPluginListTask(),
-      createBuildThirdPartyLibrariesListTask(projectStructureMapping)
     ), buildContext)
 
     buildLib()
@@ -305,6 +312,7 @@ final class DistributionJARsBuilder {
     if (!isUpdateFromSources) {
       buildNonBundledPluginsBlockMaps()
     }
+    buildThirdPartyLibrariesList(projectStructureMapping)
   }
 
   static void reorderJars(@NotNull BuildContext buildContext) {
@@ -312,25 +320,24 @@ final class DistributionJARsBuilder {
       return
     }
 
-    Path result = (Path)BuildHelper.getInstance(buildContext).reorderJars
+    BuildHelper.getInstance(buildContext).reorderJars
       .invokeWithArguments(buildContext.paths.distAllDir, buildContext.paths.distAllDir,
                            buildContext.getBootClassPathJarNames(),
                            buildContext.paths.tempDir,
                            buildContext.productProperties.platformPrefix ?: "idea",
                            buildContext.productProperties.isAntRequired ? Paths.get(buildContext.paths.communityHome, "lib/ant/lib") : null,
                            buildContext.messages)
-    buildContext.addResourceFile(result)
   }
 
   private static BuildTaskRunnable<Void> createBuildBrokenPluginListTask() {
     return BuildTaskRunnable.task(BuildOptions.BROKEN_PLUGINS_LIST_STEP, "Build broken plugin list") { BuildContext buildContext ->
-      Path targetFile = Paths.get(buildContext.paths.temp, "brokenPlugins.db")
+      Path targetFile = buildContext.paths.tempDir.resolve("brokenPlugins.db")
       String currentBuildString = buildContext.buildNumber
       BuildHelper.getInstance(buildContext).brokenPluginsTask.invokeWithArguments(targetFile,
                                                                                   currentBuildString,
                                                                                   buildContext.options.isInDevelopmentMode,
                                                                                   buildContext.messages)
-      buildContext.addResourceFile(targetFile)
+      buildContext.addDistFile(new Pair<Path, String>(targetFile, "bin"))
     }
   }
 
@@ -453,14 +460,12 @@ final class DistributionJARsBuilder {
     }
   }
 
-  @NotNull
-  private static BuildTaskRunnable<Void> createBuildThirdPartyLibrariesListTask(@NotNull ProjectStructureMapping projectStructureMapping) {
-    return BuildTaskRunnable.task(BuildOptions.THIRD_PARTY_LIBRARIES_LIST_STEP,
-                                    "Generate table of licenses for used third-party libraries") { buildContext ->
+  private void buildThirdPartyLibrariesList(@NotNull ProjectStructureMapping projectStructureMapping) {
+    buildContext.executeStep("Generate table of licenses for used third-party libraries", BuildOptions.THIRD_PARTY_LIBRARIES_LIST_STEP) {
       LibraryLicensesListGenerator generator = LibraryLicensesListGenerator.create(buildContext.messages,
                                                                                    buildContext.project,
                                                                                    buildContext.productProperties.allLibraryLicenses,
-                                                                                   projectStructureMapping.includedModules as Set<String>)
+                                                                                   projectStructureMapping.includedModules)
       generator.generateHtml(getThirdPartyLibrariesHtmlFilePath(buildContext))
       generator.generateJson(getThirdPartyLibrariesJsonFilePath(buildContext))
     }
@@ -591,8 +596,54 @@ final class DistributionJARsBuilder {
         LayoutBuilder layoutBuilder = createLayoutBuilder()
         buildContext.messages.block("Build bundled plugins for $osFamily.osName") {
           buildPlugins(layoutBuilder, osSpecificPlugins,
-                       Paths.get(buildContext.paths.buildOutputRoot, "dist.$osFamily.distSuffix", "plugins"), projectStructureMapping)
+                       getOsSpecificDistDirectory(osFamily, buildContext).resolve("plugins"), projectStructureMapping)
         }
+      }
+    }
+  }
+
+  static Path getOsSpecificDistDirectory(OsFamily osFamily, BuildContext buildContext) {
+    Paths.get(buildContext.paths.buildOutputRoot, "dist.$osFamily.distSuffix")
+  }
+
+  /**
+   * @return predicate to test if a given plugin should ne auto-published
+   */
+  @NotNull
+  private Predicate<PluginLayout> loadPluginsAutoPublishList() {
+    Path configFile = buildContext.paths.communityHomeDir.resolve("../build/plugins-autoupload.txt")
+    String productCode = buildContext.applicationInfo.productCode
+    Collection<String> config = Files.lines(configFile)
+      .withCloseable { Stream<String> lines ->
+        lines
+          .map({ String line -> StringUtil.split(line, "//", true, false)[0] } as Function<String, String>)
+          .map({ String line -> StringUtil.split(line, "#", true, false)[0] } as Function<String, String>)
+          .map({ String line -> line.trim() } as Function<String, String>)
+          .filter({ String line -> !line.isEmpty() } as Predicate<String>)
+          .map({ String line -> line.toString() /*make sure there is no GString involved */} as Function<String, String>)
+          .collect(Collectors.toCollection({ new TreeSet<String>(String.CASE_INSENSITIVE_ORDER) } as Supplier<Collection<String>>))
+      }
+
+    return new Predicate<PluginLayout>() {
+      @Override
+      boolean test(PluginLayout plugin) {
+        if (plugin == null) return false
+
+        //see the specification in the plugins-autoupload.txt. Supported rules:
+        //   <plugin main module name> ## include the plugin
+        //   +<product code>:<plugin main module name> ## include the plugin
+        //   -<product code>:<plugin main module name> ## exclude the plugin
+
+        String module = plugin.mainModule
+        String excludeRule = "-${productCode}:${module}"
+        String includeRule = "+${productCode}:${module}"
+
+        if (config.contains(excludeRule)) {
+          //the exclude rule is the most powerful
+          return false
+        }
+
+        return config.contains(module) || config.contains(includeRule.toString())
       }
     }
   }
@@ -614,21 +665,14 @@ final class DistributionJARsBuilder {
       String pluginsDirectoryName = "${buildContext.applicationInfo.productCode}-plugins"
       Path nonBundledPluginsArtifacts = Paths.get(buildContext.paths.artifacts, pluginsDirectoryName)
       List<PluginRepositorySpec> pluginsToIncludeInCustomRepository = new ArrayList<PluginRepositorySpec>()
-      Set<String> whiteList = Files.lines(buildContext.paths.communityHomeDir.resolve("../build/plugins-autoupload-whitelist.txt"))
-        .withCloseable { Stream<String> lines ->
-          lines.map({ String line -> line.trim() } as Function<String, String>)
-            .filter({ String line -> !line.isEmpty() && !line.startsWith("//") } as Predicate<String>)
-            .collect(Collectors.toSet())
-        }
+      Predicate<PluginLayout> autoPublishPluginChecker = loadPluginsAutoPublishList()
 
       Path autoUploadingDir = nonBundledPluginsArtifacts.resolve("auto-uploading")
       Path patchedPluginXmlDir = buildContext.paths.tempDir.resolve("patched-plugin-xml")
       List<Map.Entry<String, Path>> toArchive = new ArrayList<>()
       for (plugin in pluginsToPublish) {
         String directory = getActualPluginDirectoryName(plugin, buildContext)
-        Path targetDirectory = whiteList.contains(plugin.mainModule)
-          ? nonBundledPluginsArtifacts.resolve("auto-uploading")
-          : nonBundledPluginsArtifacts
+        Path targetDirectory = autoPublishPluginChecker.test(plugin) ? autoUploadingDir : nonBundledPluginsArtifacts
         Path destFile = targetDirectory.resolve("$directory-${pluginVersion}.zip")
 
         if (productLayout.prepareCustomPluginRepositoryForPublishedPlugins) {
@@ -663,6 +707,11 @@ final class DistributionJARsBuilder {
       if (productLayout.prepareCustomPluginRepositoryForPublishedPlugins) {
         new PluginRepositoryXmlGenerator(buildContext).generate(pluginsToIncludeInCustomRepository, nonBundledPluginsArtifacts.toString())
         buildContext.notifyArtifactWasBuilt(nonBundledPluginsArtifacts.resolve("plugins.xml"))
+
+        def autoUploadingDirPath = autoUploadingDir.toString()
+        def autoUploadingPlugins = pluginsToIncludeInCustomRepository.findAll { it.pluginZip.startsWith(autoUploadingDirPath) }
+        new PluginRepositoryXmlGenerator(buildContext).generate(autoUploadingPlugins, autoUploadingDirPath)
+        buildContext.notifyArtifactWasBuilt(autoUploadingDir.resolve("plugins.xml"))
       }
     }
   }
@@ -803,7 +852,7 @@ final class DistributionJARsBuilder {
     def productLayout = buildContext.productProperties.productLayout
     def includeInBuiltinCustomRepository = productLayout.prepareCustomPluginRepositoryForPublishedPlugins &&
             buildContext.proprietaryBuildTools.artifactsServer != null
-    CompatibleBuildRange compatibleBuildRange = bundled ||
+    CompatibleBuildRange compatibleBuildRange = bundled || plugin.pluginCompatibilityExactVersion ||
             //plugins included into the built-in custom plugin repository should use EXACT range because such custom repositories are used for nightly builds and there may be API differences between different builds
             includeInBuiltinCustomRepository ? CompatibleBuildRange.EXACT :
                     //when publishing plugins with EAP build let's use restricted range to ensure that users will update to a newer version of the plugin when they update to the next EAP or release build
@@ -816,7 +865,22 @@ final class DistributionJARsBuilder {
 
     def pluginVersion = plugin.versionEvaluator.apply(patchedPluginXmlFile, defaultPluginVersion)
 
-    setPluginVersionAndSince(patchedPluginXmlFile, pluginVersion, compatibleBuildRange, pluginsToPublish.contains(plugin))
+    Pair<String, String> sinceUntil = getCompatiblePlatformVersionRange(compatibleBuildRange, buildContext.buildNumber)
+
+    try {
+      pluginXmlPatcher.patchPluginXml(
+        patchedPluginXmlFile,
+        plugin.mainModule,
+        pluginVersion,
+        sinceUntil,
+        pluginsToPublish.contains(plugin),
+        plugin.retainProductDescriptorForBundledPlugin,
+      )
+    }
+    catch (Throwable t) {
+      throw new RuntimeException("Could not patch $pluginXmlPath: ${t.message}", t)
+    }
+
     layoutBuilder.patchModuleOutput(plugin.mainModule, patchedPluginXmlDir)
   }
 
@@ -1102,7 +1166,7 @@ final class DistributionJARsBuilder {
       if (copyFiles) {
         Files.createDirectories(libOutputDir)
         if (!removeVersionFromJarName && files.size() > 1) {
-          String mergedFilename = library.name.toLowerCase()
+          String mergedFilename = FileUtil.sanitizeFileName(library.name.toLowerCase(), false)
           if (mergedFilename == "gradle") {
             mergedFilename = "gradle-lib"
           }
@@ -1164,51 +1228,6 @@ final class DistributionJARsBuilder {
 
   private LayoutBuilder createLayoutBuilder() {
     new LayoutBuilder(buildContext, COMPRESS_JARS)
-  }
-
-  private void setPluginVersionAndSince(@NotNull Path pluginXmlFile, String pluginVersion, CompatibleBuildRange compatibleBuildRange, boolean toPublish) {
-    Pair<String, String> sinceUntil = getCompatiblePlatformVersionRange(compatibleBuildRange, buildContext.buildNumber)
-    def text = Files.readString(pluginXmlFile)
-            .replaceFirst(
-                    "<version>[\\d.]*</version>",
-                    "<version>${pluginVersion}</version>")
-            .replaceFirst(
-                    "<idea-version\\s+since-build=\"(\\d+\\.)+\\d+\"\\s+until-build=\"(\\d+\\.)+\\d+\"",
-                    "<idea-version since-build=\"${sinceUntil.first}\" until-build=\"${sinceUntil.second}\"")
-            .replaceFirst(
-                    "<idea-version\\s+since-build=\"(\\d+\\.)+\\d+\"",
-                    "<idea-version since-build=\"${sinceUntil.first}\"")
-            .replaceFirst(
-                    "<change-notes>\\s+<\\!\\[CDATA\\[\\s*Plugin version: \\\$\\{version\\}",
-                    "<change-notes>\n<![CDATA[\nPlugin version: ${pluginVersion}")
-
-    if (text.contains("<product-descriptor ")) {
-      def eapAttribute = buildContext.applicationInfo.isEAP ? "eap=\"true\"" : ""
-      def releaseDate = buildContext.applicationInfo.majorReleaseDate ?:
-              ZonedDateTime.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("uuuuMMdd"))
-      def releaseVersion = "${buildContext.applicationInfo.majorVersion}${buildContext.applicationInfo.minorVersionMainPart}00"
-      text = text.replaceFirst(
-              "<product-descriptor code=\"([\\w]*)\"\\s+release-date=\"[^\"]*\"\\s+release-version=\"[^\"]*\"([^/]*)/>",
-              !toPublish ? "" :
-              "<product-descriptor code=\"\$1\" release-date=\"$releaseDate\" release-version=\"$releaseVersion\" $eapAttribute \$2 />")
-      buildContext.messages.info("        ${toPublish ? "Patching" : "Skipping"} ${pluginXmlFile.parent.parent.fileName} <product-descriptor/>")
-
-      //hack for publishing: we plugin is compatible only with WebStorm
-      if (toPublish && text.contains("code=\"PDB\"") &&
-          buildContext.getApplicationInfo().productName == "WebStorm") {
-        text = text.replace("Database Tools and SQL", "Database Tools and SQL for WebStorm")
-        text = text.replace("IntelliJ-based IDEs", "WebStorm")
-      }
-    }
-
-    def anchor = text.contains("</id>") ? "</id>" : "</name>"
-    if (!text.contains("<version>")) {
-      text = text.replace(anchor, "${anchor}\n  <version>${pluginVersion}</version>")
-    }
-    if (!text.contains("<idea-version since-build")) {
-      text = text.replace(anchor, "${anchor}\n  <idea-version since-build=\"${sinceUntil.first}\" until-build=\"${sinceUntil.second}\"/>")
-    }
-    Files.writeString(pluginXmlFile, text)
   }
 
   static Pair<String, String> getCompatiblePlatformVersionRange(CompatibleBuildRange compatibleBuildRange, String buildNumber) {

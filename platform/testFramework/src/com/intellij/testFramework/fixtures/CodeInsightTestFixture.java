@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.testFramework.fixtures;
 
 import com.intellij.codeInsight.completion.CompletionType;
@@ -12,6 +12,7 @@ import com.intellij.codeInspection.InspectionProfileEntry;
 import com.intellij.codeInspection.InspectionToolProvider;
 import com.intellij.codeInspection.LocalInspectionTool;
 import com.intellij.codeInspection.ex.InspectionToolWrapper;
+import com.intellij.find.usages.api.SearchTarget;
 import com.intellij.ide.structureView.newStructureView.StructureViewComponent;
 import com.intellij.lang.annotation.HighlightSeverity;
 import com.intellij.model.psi.PsiSymbolReference;
@@ -34,12 +35,15 @@ import com.intellij.psi.PsiReference;
 import com.intellij.refactoring.rename.PsiElementRenameHandler;
 import com.intellij.refactoring.rename.RenameHandler;
 import com.intellij.refactoring.rename.RenameProcessor;
+import com.intellij.refactoring.rename.api.RenameTarget;
 import com.intellij.testFramework.*;
 import com.intellij.ui.components.breadcrumbs.Crumb;
 import com.intellij.usageView.UsageInfo;
 import com.intellij.usages.Usage;
+import com.intellij.usages.UsageTarget;
 import com.intellij.util.Consumer;
 import org.intellij.lang.annotations.MagicConstant;
+import org.jetbrains.annotations.ApiStatus.Experimental;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -465,6 +469,8 @@ public interface CodeInsightTestFixture extends IdeaProjectTestFixture {
   @NotNull
   String getUsageViewTreeTextRepresentation(@NotNull Collection<? extends UsageInfo> usages);
 
+  @NotNull String getUsageViewTreeTextRepresentation(@NotNull List<UsageTarget> usageTargets, @NotNull Collection<? extends Usage> usages);
+
   /**
    * @return a text representation of {@link com.intellij.usages.UsageView} created from usages of {@code to}
    * <p>
@@ -473,6 +479,7 @@ public interface CodeInsightTestFixture extends IdeaProjectTestFixture {
   @NotNull
   String getUsageViewTreeTextRepresentation(@NotNull PsiElement to);
 
+  @NotNull String getUsageViewTreeTextRepresentation(@NotNull SearchTarget target);
 
   RangeHighlighter @NotNull [] testHighlightUsages(@TestDataFile String @NotNull ... files);
 
@@ -510,11 +517,11 @@ public interface CodeInsightTestFixture extends IdeaProjectTestFixture {
    */
   LookupElement[] complete(@NotNull CompletionType type, int invocationCount);
 
-  void checkResult(@NotNull String text);
+  void checkResult(@NotNull String expectedText);
 
-  void checkResult(@NotNull String text, boolean stripTrailingSpaces);
+  void checkResult(@NotNull String expectedText, boolean stripTrailingSpaces);
 
-  void checkResult(@NotNull String filePath, @NotNull String text, boolean stripTrailingSpaces);
+  void checkResult(@NotNull String filePath, @NotNull String expectedText, boolean stripTrailingSpaces);
 
   Document getDocument(@NotNull PsiFile file);
 
@@ -591,6 +598,9 @@ public interface CodeInsightTestFixture extends IdeaProjectTestFixture {
    * @param newName new name for the element
    */
   void renameElement(@NotNull PsiElement element, @NotNull String newName);
+
+  @Experimental
+  void renameTarget(@NotNull RenameTarget renameTarget, @NotNull String newName);
 
   void allowTreeAccessForFile(@NotNull VirtualFile file);
 

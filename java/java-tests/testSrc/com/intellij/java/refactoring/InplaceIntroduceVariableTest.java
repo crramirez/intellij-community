@@ -209,6 +209,15 @@ public class InplaceIntroduceVariableTest extends AbstractJavaInplaceIntroduceTe
                         List.of("Replace this occurrence only", "Replace all 2 occurrences (will change semantics!)"));
   }
   
+  public void testSelectLValueThenFilterIt() {
+    doTestReplaceChoice("Replace read and write occurrences (will change semantics!)", null,
+                        List.of("Replace this occurrence only", "Replace read and write occurrences (will change semantics!)"));
+  }
+  
+  public void testSelectLValueThenFilterItFinal() {
+    doTest(null);
+  }
+  
   public void testHeavilyBrokenFile() {
     doTest(null);
   }
@@ -228,9 +237,25 @@ public class InplaceIntroduceVariableTest extends AbstractJavaInplaceIntroduceTe
   public void testHeavilyBrokenFile5() {
     doTest(null);
   }
-  
+
   public void testHeavilyBrokenFile6() {
     doTest(null);
+  }
+
+  public void testHeavilyBrokenFile7() {
+    doTestReplaceChoice("Replace all 0 occurrences");
+  }
+
+  public void testHeavilyBrokenFile8() {
+    doTest(null);
+  }
+
+  public void testHeavilyBrokenFile9() {
+    doTest(null);
+  }
+
+  public void testHeavilyBrokenFile10() {
+    doTestReplaceChoice("Replace all 0 occurrences", introducer -> type("xyz"));
   }
 
   public void testAnnotationArgument() {

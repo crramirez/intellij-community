@@ -63,6 +63,7 @@ public abstract class FileEditorManager {
    * @deprecated use {@link #openTextEditor(OpenFileDescriptor, boolean)}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public void navigateToTextEditor(@NotNull OpenFileDescriptor descriptor, boolean focusEditor) {
     openTextEditor(descriptor, focusEditor);
   }
@@ -94,6 +95,17 @@ public abstract class FileEditorManager {
    * @return all opened files. Order of files in the array corresponds to the order of editor tabs.
    */
   public abstract VirtualFile @NotNull [] getOpenFiles();
+
+  /**
+   * @return all opened files including ones which were opened by guests during a collaborative development session.
+   * Order of files in the array corresponds to the order of host's editor tabs, order for guests isn't determined.
+   * There're cases when only editors for of a particular user is needed (e.g. a search scope 'open files'),
+   * but at the same time editor notifications should be shown to all users
+   */
+  @ApiStatus.Experimental
+  public VirtualFile @NotNull [] getOpenFilesWithRemotes() {
+    return getOpenFiles();
+  }
 
   public boolean hasOpenFiles() {
     return getOpenFiles().length > 0;
@@ -190,13 +202,6 @@ public abstract class FileEditorManager {
    */
   @Deprecated
   public void addFileEditorManagerListener(@NotNull FileEditorManagerListener listener) {
-  }
-
-  /**
-   * @deprecated Use {@link FileEditorManagerListener#FILE_EDITOR_MANAGER} instead
-   */
-  @Deprecated
-  public void addFileEditorManagerListener(@NotNull FileEditorManagerListener listener, @NotNull Disposable parentDisposable) {
   }
 
   /**

@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.debugger.memory.agent;
 
 import com.intellij.debugger.DebuggerManager;
@@ -69,7 +69,7 @@ public final class MemoryAgentUtil {
 
   private static final int ESTIMATE_OBJECTS_SIZE_LIMIT = 2000;
 
-  public static void addMemoryAgent(@NotNull JavaParameters parameters) {
+  public static void addMemoryAgent(@NotNull JavaParameters parameters, Project project) {
     if (!DebuggerSettings.getInstance().ENABLE_MEMORY_AGENT) {
       return;
     }
@@ -125,14 +125,14 @@ public final class MemoryAgentUtil {
     }
     path += "=" + args;
     parametersList.add("-agentpath:" + path);
-    listenIfStartupFailed();
+    listenIfStartupFailed(project);
   }
 
   @NotNull
   public static List<JavaReferenceInfo> tryCalculateSizes(@NotNull EvaluationContextImpl context,
                                                           @NotNull List<JavaReferenceInfo> objects) {
     MemoryAgent agent = MemoryAgent.get(context.getDebugProcess());
-    if (!agent.capabilities().canEstimateObjectsSizes()) return objects;
+    if (!agent.getCapabilities().canEstimateObjectsSizes()) return objects;
     if (objects.size() > ESTIMATE_OBJECTS_SIZE_LIMIT) {
       LOG.info("Too many objects to estimate their sizes");
       return objects;
@@ -171,7 +171,7 @@ public final class MemoryAgentUtil {
         if (context.isEvaluationPossible()) {
           if (isInitialized.compareAndSet(false, true)) {
             debugProcess.removeDebugProcessListener(this);
-            MemoryAgentOperations.initializeAgent(context);
+            MemoryAgentInitializer.initializeAgent(context);
           }
         }
       }
@@ -238,8 +238,8 @@ public final class MemoryAgentUtil {
    * The purpose of this method is to try catch cases when VM failed to initialize because of memory agent and suggest user
    * disable the agent.
    */
-  private static void listenIfStartupFailed() {
-    Project project = JavaDebuggerSupport.getContextProjectForEditorFieldsInDebuggerConfigurables();
+  private static void listenIfStartupFailed(Project prj) {
+    Project project = prj != null ? prj : JavaDebuggerSupport.getContextProjectForEditorFieldsInDebuggerConfigurables();
     if (Boolean.TRUE.equals(project.getUserData(LISTEN_MEMORY_AGENT_STARTUP_FAILED))) return;
     project.putUserData(LISTEN_MEMORY_AGENT_STARTUP_FAILED, true);
 

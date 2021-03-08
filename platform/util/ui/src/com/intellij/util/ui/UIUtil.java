@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.util.ui;
 
 import com.intellij.BundleBase;
@@ -553,8 +553,9 @@ public final class UIUtil {
    * @return the property value from the specified component or {@code null}
    */
   public static <T> T getClientProperty(Object component, @NotNull Key<T> key) {
+    Object value = getClientProperty(component, (Object)key);
     //noinspection unchecked
-    return (T)getClientProperty(component, (Object)key);
+    return value != null ? (T)value : null;
   }
 
   public static <T> void putClientProperty(@NotNull JComponent component, @NotNull Key<T> key, T value) {
@@ -703,6 +704,7 @@ public final class UIUtil {
    * @deprecated Use {@link LinePainter2D#paint(Graphics2D, double, double, double, double)} instead.
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static void drawLine(@NotNull Graphics g, int x1, int y1, int x2, int y2) {
     LinePainter2D.paint((Graphics2D)g, x1, y1, x2, y2);
   }
@@ -873,7 +875,7 @@ public final class UIUtil {
   }
 
   public static @NotNull Color getContextHelpForeground() {
-    return JBUI.CurrentTheme.ContextHelp.foreground();
+    return JBUI.CurrentTheme.ContextHelp.FOREGROUND;
   }
 
   public static @Nls @NotNull String removeMnemonic(@Nls @NotNull String s) {
@@ -898,6 +900,7 @@ public final class UIUtil {
    * @deprecated use {@link #getTreeForeground()}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static @NotNull Color getTreeTextForeground() {
     return getTreeForeground();
   }
@@ -922,24 +925,8 @@ public final class UIUtil {
     return JBColor.namedColor("Component.infoForeground", new JBColor(Gray.x99, Gray.x78));
   }
 
-  /**
-   * @deprecated use {@link UIUtil#getTextFieldBackground()} instead
-   */
-  @Deprecated
-  public static Color getActiveTextFieldBackgroundColor() {
-    return getTextFieldBackground();
-  }
-
   public static Color getInactiveTextFieldBackgroundColor() {
     return UIManager.getColor("TextField.inactiveBackground");
-  }
-
-  /**
-   * @deprecated use {@link UIUtil#getInactiveTextColor()} instead
-   */
-  @Deprecated
-  public static @NotNull Color getTextInactiveTextColor() {
-    return getInactiveTextColor();
   }
 
   public static Color getTreeSelectionBorderColor() {
@@ -1046,28 +1033,15 @@ public final class UIUtil {
     return UIManager.getFont("Menu.font");
   }
 
-  /**
-   * @deprecated use {@link JBUI.CurrentTheme.CustomFrameDecorations#separatorForeground()}
-   */
-  @Deprecated
-  public static @NotNull Color getSeparatorForeground() {
-    return JBUI.CurrentTheme.CustomFrameDecorations.separatorForeground();
-  }
-
   public static Color getSeparatorShadow() {
     return UIManager.getColor("Separator.shadow");
   }
 
-  @SuppressWarnings("MissingDeprecatedAnnotation")
-  @Deprecated
-  public static Color getSeparatorHighlight() {
-    return UIManager.getColor("Separator.highlight");
-  }
-
   /**
    * @deprecated use {@link JBUI.CurrentTheme.CustomFrameDecorations#separatorForeground()}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static @NotNull Color getSeparatorColor() {
     return JBUI.CurrentTheme.CustomFrameDecorations.separatorForeground();
   }
@@ -1119,12 +1093,6 @@ public final class UIUtil {
     return AllIcons.General.BalloonError;
   }
 
-  @SuppressWarnings("MissingDeprecatedAnnotation")
-  @Deprecated
-  public static Icon getRadioButtonIcon() {
-    return UIManager.getIcon("RadioButton.icon");
-  }
-
   public static @NotNull Icon getTreeNodeIcon(boolean expanded, boolean selected, boolean focused) {
     boolean white = selected && focused || StartupUiUtil.isUnderDarcula();
 
@@ -1154,14 +1122,6 @@ public final class UIUtil {
     return UIManager.getIcon("Tree.expandedIcon");
   }
 
-  /**
-   * @deprecated use {@link #getTreeExpandedIcon()} and {@link #getTreeCollapsedIcon()}
-   */
-  @Deprecated
-  public static Icon getTreeIcon(boolean expanded) {
-    return expanded ? getTreeExpandedIcon() : getTreeCollapsedIcon();
-  }
-
   public static @NotNull Icon getTreeSelectedCollapsedIcon() {
     Icon icon = UIManager.getIcon("Tree.collapsedSelectedIcon");
     return icon != null ? icon : getTreeCollapsedIcon();
@@ -1174,6 +1134,7 @@ public final class UIUtil {
 
   @SuppressWarnings("MissingDeprecatedAnnotation")
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static Border getTableHeaderCellBorder() {
     return UIManager.getBorder("TableHeader.cellBorder");
   }
@@ -1620,14 +1581,6 @@ public final class UIUtil {
   }
 
   /**
-   * @deprecated Use {@link ImageUtil#createImage(GraphicsConfiguration, int, int, int)}
-   */
-  @Deprecated
-  public static @NotNull BufferedImage createImage(@Nullable GraphicsConfiguration gc, int width, int height, int type) {
-    return ImageUtil.createImage(gc, width, height, type);
-  }
-
-  /**
    * Creates a HiDPI-aware BufferedImage in the graphics config scale.
    *
    * @param gc the graphics config
@@ -1648,14 +1601,6 @@ public final class UIUtil {
   }
 
   /**
-   * @deprecated Use {@link ImageUtil#createImage(Graphics, int, int, int)}
-   */
-  @Deprecated
-  public static @NotNull BufferedImage createImage(Graphics g, int width, int height, int type) {
-    return ImageUtil.createImage(g, width, height, type);
-  }
-
-  /**
    * Creates a HiDPI-aware BufferedImage in the component scale.
    *
    * @param component the component associated with the target graphics device
@@ -1668,14 +1613,6 @@ public final class UIUtil {
    */
   public static @NotNull BufferedImage createImage(@Nullable Component component, int width, int height, int type) {
     return ImageUtil.createImage(component == null ? null : component.getGraphicsConfiguration(), width, height, type);
-  }
-
-  /**
-   * @deprecated use {@link #createImage(Graphics, int, int, int)}
-   */
-  @Deprecated
-  public static @NotNull BufferedImage createImageForGraphics(Graphics2D g, int width, int height, int type) {
-    return ImageUtil.createImage(g, width, height, type);
   }
 
   /**
@@ -1839,6 +1776,7 @@ public final class UIUtil {
    * @deprecated use {@link ComponentUtil#findParentByCondition(Component, java.util.function.Predicate)}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static Component findParentByCondition(@Nullable Component c, @NotNull Condition<? super Component> condition) {
     return ComponentUtil.findParentByCondition(c, it -> condition.value(it));
   }
@@ -1876,7 +1814,7 @@ public final class UIUtil {
 
   @Language("HTML")
   public static @NlsSafe @NotNull String getCssFontDeclaration(@NotNull Font font) {
-    return getCssFontDeclaration(font, getLabelForeground(), JBUI.CurrentTheme.Link.linkColor(), null);
+    return getCssFontDeclaration(font, getLabelForeground(), JBUI.CurrentTheme.Link.Foreground.ENABLED, null);
   }
 
   @Language("HTML")
@@ -2581,16 +2519,9 @@ public final class UIUtil {
    * @deprecated Use {@link TimerUtil#createNamedTimer(String, int, ActionListener)}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static @NotNull Timer createNamedTimer(@NonNls @NotNull String name, int delay, @NotNull ActionListener listener) {
     return TimerUtil.createNamedTimer(name, delay, listener);
-  }
-
-  /**
-   * @deprecated Use {@link TimerUtil#createNamedTimer(String, int)}
-   */
-  @Deprecated
-  public static @NotNull Timer createNamedTimer(@NonNls @NotNull String name, int delay) {
-    return TimerUtil.createNamedTimer(name, delay);
   }
 
   public static boolean isDialogRootPane(JRootPane rootPane) {
@@ -3160,6 +3091,7 @@ public final class UIUtil {
    * @deprecated use {@link #getListSelectionBackground(boolean)}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static @NotNull Color getListUnfocusedSelectionBackground() {
     return getListSelectionBackground(false);
   }
@@ -3191,6 +3123,7 @@ public final class UIUtil {
    * @deprecated use {@link #getListForeground(boolean, boolean)}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static @NotNull Color getListForeground(boolean selected) {
     return getListForeground(selected, true);
   }
@@ -3317,14 +3250,6 @@ public final class UIUtil {
     return getTableSelectionBackground(true);
   }
 
-  /**
-   * @deprecated use {@link #getTableSelectionBackground(boolean)}
-   */
-  @Deprecated
-  public static @NotNull Color getTableUnfocusedSelectionBackground() {
-    return getTableSelectionBackground(false);
-  }
-
   // foreground
 
   /**
@@ -3352,6 +3277,7 @@ public final class UIUtil {
    * @deprecated use {@link #getTableForeground(boolean, boolean)}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static @NotNull Color getTableForeground(boolean selected) {
     return getTableForeground(selected, true);
   }
@@ -3368,6 +3294,7 @@ public final class UIUtil {
    * @deprecated use {@link JBUIScale#getSystemFontData()}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static Pair<String, Integer> getSystemFontData() {
     return JBUIScale.getSystemFontData();
   }
@@ -3376,6 +3303,7 @@ public final class UIUtil {
    * @deprecated use {@link JreHiDpiUtil#isJreHiDPIEnabled()}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static boolean isJreHiDPIEnabled() {
     return JreHiDpiUtil.isJreHiDPIEnabled();
   }
@@ -3384,7 +3312,7 @@ public final class UIUtil {
    * @deprecated use {@link JreHiDpiUtil#isJreHiDPI(Graphics2D)}
    */
   @Deprecated
-  @ApiStatus.ScheduledForRemoval
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.2")
   public static boolean isJreHiDPI(@Nullable Graphics2D g) {
     return JreHiDpiUtil.isJreHiDPI(g);
   }
@@ -3394,7 +3322,7 @@ public final class UIUtil {
    */
   @SuppressWarnings("SpellCheckingInspection")
   @Deprecated
-  @ApiStatus.ScheduledForRemoval
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.2")
   public static @NotNull Color getPanelBackgound() {
     return getPanelBackground();
   }

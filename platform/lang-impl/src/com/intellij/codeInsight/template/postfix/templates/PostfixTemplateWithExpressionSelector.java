@@ -12,6 +12,7 @@ import com.intellij.openapi.util.Pass;
 import com.intellij.psi.PsiElement;
 import com.intellij.refactoring.IntroduceTargetChooser;
 import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -26,6 +27,7 @@ public abstract class PostfixTemplateWithExpressionSelector extends PostfixTempl
    * @deprecated use {@link #PostfixTemplateWithExpressionSelector(String, String, String, String, PostfixTemplateExpressionSelector, PostfixTemplateProvider)}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   protected PostfixTemplateWithExpressionSelector(@NotNull @NlsSafe String name,
                                                   @NotNull @NlsSafe String key,
                                                   @NotNull @NlsSafe String example,
@@ -37,6 +39,7 @@ public abstract class PostfixTemplateWithExpressionSelector extends PostfixTempl
    * @deprecated use {@link #PostfixTemplateWithExpressionSelector(String, String, String, PostfixTemplateExpressionSelector, PostfixTemplateProvider)}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   protected PostfixTemplateWithExpressionSelector(@NotNull @NlsSafe String name,
                                                   @NotNull @NlsSafe String example,
                                                   @NotNull PostfixTemplateExpressionSelector selector) {
@@ -63,7 +66,7 @@ public abstract class PostfixTemplateWithExpressionSelector extends PostfixTempl
   }
 
   @Override
-  public final boolean isApplicable(@NotNull PsiElement context, @NotNull Document copyDocument, int newOffset) {
+  public boolean isApplicable(@NotNull PsiElement context, @NotNull Document copyDocument, int newOffset) {
     return mySelector.hasExpression(context, copyDocument, newOffset);
   }
 
@@ -92,7 +95,7 @@ public abstract class PostfixTemplateWithExpressionSelector extends PostfixTempl
 
     IntroduceTargetChooser.showChooser(
       editor, expressions,
-      new Pass<PsiElement>() {
+      new Pass<>() {
         @Override
         public void pass(@NotNull final PsiElement e) {
           prepareAndExpandForChooseExpression(e, editor);

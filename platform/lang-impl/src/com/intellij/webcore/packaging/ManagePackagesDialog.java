@@ -1,6 +1,7 @@
 // Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.webcore.packaging;
 
+import com.intellij.execution.ExecutionException;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.IdeBundle;
 import com.intellij.ide.plugins.PluginManagerMain;
@@ -20,8 +21,8 @@ import com.intellij.ui.*;
 import com.intellij.ui.components.JBList;
 import com.intellij.ui.scale.JBUIScale;
 import com.intellij.util.CatchingConsumer;
-import com.intellij.util.Function;
 import com.intellij.util.ObjectUtils;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.PlatformColors;
 import com.intellij.util.ui.SwingHelper;
 import com.intellij.util.ui.UIUtil;
@@ -111,7 +112,7 @@ public class ManagePackagesDialog extends DialogWrapper {
         });
       }
     };
-    myListSpeedSearch = new ListSpeedSearch(myPackages, (Function<Object, String>)o -> {
+    myListSpeedSearch = new ListSpeedSearch(myPackages, o -> {
       if (o instanceof RepoPackage)
         return ((RepoPackage)o).getName();
       return "";
@@ -265,15 +266,13 @@ public class ManagePackagesDialog extends DialogWrapper {
   private void updateInstalledPackages() {
     ApplicationManager.getApplication().executeOnPooledThread(() -> {
       try {
-        final Collection<InstalledPackage> installedPackages = myController.getInstalledPackages();
+        List<String> installedPackages = ContainerUtil.map(myController.getInstalledPackagesList(), InstalledPackage::getName);
         UIUtil.invokeLaterIfNeeded(() -> {
           myInstalledPackages.clear();
-          for (InstalledPackage pkg : installedPackages) {
-            myInstalledPackages.add(pkg.getName());
-          }
+          myInstalledPackages.addAll(installedPackages);
         });
       }
-      catch(IOException e) {
+      catch (ExecutionException e) {
         LOG.info("Error updating list of installed packages", e);
       }
     });
@@ -445,7 +444,7 @@ public class ManagePackagesDialog extends DialogWrapper {
         mySelectedPackageName = packageName;
         myVersionComboBox.removeAllItems();
         if (myVersionCheckBox.isEnabled()) {
-          myController.fetchPackageVersions(packageName, new CatchingConsumer<List<String>, Exception>() {
+          myController.fetchPackageVersions(packageName, new CatchingConsumer<>() {
             @Override
             public void consume(final List<@NlsSafe String> releases) {
               ApplicationManager.getApplication().invokeLater(() -> {

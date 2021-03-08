@@ -26,7 +26,7 @@ import java.nio.file.Path
 
 class JavaLangSupport : AbstractLangSupport() {
   override val defaultProjectName = "IdeaLearningProject"
-  override val projectResourcePath = "/learnProjects/java/LearnProject"
+  override val projectResourcePath = "learnProjects/java/LearnProject"
 
   override val primaryLanguage: String = "JAVA"
 
@@ -114,10 +114,5 @@ class JavaLangSupport : AbstractLangSupport() {
 
   override fun blockProjectFileModification(project: Project, file: VirtualFile): Boolean {
     return file.name != projectSandboxRelativePath
-  }
-
-  companion object {
-    @JvmStatic
-    val lang: String = "JAVA"
   }
 }

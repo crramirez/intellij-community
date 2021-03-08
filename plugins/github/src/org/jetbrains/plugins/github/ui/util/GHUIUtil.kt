@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.plugins.github.ui.util
 
 import com.intellij.UtilBundle
@@ -7,7 +7,6 @@ import com.intellij.openapi.editor.impl.view.FontLayoutService
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.ui.popup.JBPopupListener
 import com.intellij.openapi.ui.popup.LightweightWindowEvent
-import com.intellij.openapi.util.NlsActions
 import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.util.NlsSafe
 import com.intellij.openapi.util.Pair
@@ -22,8 +21,9 @@ import com.intellij.ui.speedSearch.SpeedSearch
 import com.intellij.util.text.DateFormatUtil
 import com.intellij.util.ui.*
 import com.intellij.util.ui.components.BorderLayoutPanel
-import icons.GithubIcons
 import icons.VcsCodeReviewIcons
+import org.jetbrains.plugins.github.GithubIcons
+import org.jetbrains.plugins.github.api.GHRepositoryCoordinates
 import org.jetbrains.plugins.github.api.data.GHLabel
 import org.jetbrains.plugins.github.api.data.GHUser
 import org.jetbrains.plugins.github.api.data.GithubIssueState
@@ -36,10 +36,7 @@ import org.jetbrains.plugins.github.util.successOnEdt
 import java.awt.Color
 import java.awt.Component
 import java.awt.Cursor
-import java.awt.event.ActionListener
-import java.awt.event.KeyEvent
-import java.awt.event.MouseAdapter
-import java.awt.event.MouseEvent
+import java.awt.event.*
 import java.beans.PropertyChangeListener
 import java.util.*
 import java.util.concurrent.CompletableFuture
@@ -305,7 +302,45 @@ object GHUIUtil {
       override fun getIcon(value: GHLabel) = ColorIcon(16, ColorUtil.fromHex(value.color))
     }
   }
+
+  @NlsSafe
+  fun getRepositoryDisplayName(allRepositories: List<GHRepositoryCoordinates>,
+                               repository: GHRepositoryCoordinates,
+                               alwaysShowOwner: Boolean = false): String {
+    val showServer = needToShowRepositoryServer(allRepositories)
+    val showOwner = if (showServer || alwaysShowOwner) true else needToShowRepositoryOwner(allRepositories)
+
+    val builder = StringBuilder()
+    if (showServer) builder.append(repository.serverPath.toUrl(false)).append("/")
+    if (showOwner) builder.append(repository.repositoryPath.owner).append("/")
+    builder.append(repository.repositoryPath.repository)
+    return builder.toString()
+  }
+
+  /**
+   * Assuming all servers are the same
+   */
+  private fun needToShowRepositoryOwner(repos: List<GHRepositoryCoordinates>): Boolean {
+    if (repos.size <= 1) return false
+    val firstOwner = repos.first().repositoryPath.owner
+    return repos.any { it.repositoryPath.owner != firstOwner }
+  }
+
+  private fun needToShowRepositoryServer(repos: List<GHRepositoryCoordinates>): Boolean {
+    if (repos.size <= 1) return false
+    val firstServer = repos.first().serverPath
+    return repos.any { it.serverPath != firstServer }
+  }
+
+  fun registerFocusActions(component: JComponent) {
+    component.registerKeyboardAction({
+                                       component.transferFocus()
+                                     }, KeyStroke.getKeyStroke(KeyEvent.VK_TAB, 0), JComponent.WHEN_FOCUSED)
+    component.registerKeyboardAction({
+                                       component.transferFocusBackward()
+                                     }, KeyStroke.getKeyStroke(KeyEvent.VK_TAB, InputEvent.SHIFT_DOWN_MASK), JComponent.WHEN_FOCUSED)
+  }
 }
 
-@NlsActions.ActionText
+@NlsSafe
 fun Action.getName(): String = (getValue(Action.NAME) as? String).orEmpty()

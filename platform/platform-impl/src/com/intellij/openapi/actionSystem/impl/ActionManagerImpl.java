@@ -51,7 +51,6 @@ import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectType;
 import com.intellij.openapi.util.*;
-import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtilRt;
 import com.intellij.openapi.util.text.Strings;
 import com.intellij.openapi.wm.IdeFocusManager;
@@ -72,6 +71,7 @@ import org.jdom.Element;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 
 import javax.swing.Timer;
 import javax.swing.*;
@@ -134,6 +134,7 @@ public final class ActionManagerImpl extends ActionManagerEx implements Disposab
   private static final String KEEP_CONTENT_ATTR_NAME = "keep-content";
   private static final String PROJECT_TYPE = "project-type";
   private static final String UNREGISTER_ELEMENT_NAME = "unregister";
+  private static final String PROHIBIT_ELEMENT_NAME = "prohibit";
   private static final String OVERRIDE_TEXT_ELEMENT_NAME = "override-text";
   private static final String SYNONYM_ELEMENT_NAME = "synonym";
   private static final String PLACE_ATTR_NAME = "place";
@@ -149,6 +150,7 @@ public final class ActionManagerImpl extends ActionManagerEx implements Disposab
   private final Map<String, AnAction> idToAction = CollectionFactory.createSmallMemoryFootprintMap();
   private final MultiMap<PluginId, String> pluginToId = new MultiMap<>();
   private final Object2IntMap<String> idToIndex = new Object2IntOpenHashMap<>();
+  private final Set<String> myProhibitedActionIds = new HashSet<>();
   private final Map<Object, String> actionToId = CollectionFactory.createSmallMemoryFootprintMap();
   private final MultiMap<String, String> idToGroupId = new MultiMap<>();
   private final List<String> myNotRegisteredInternalActionIds = new ArrayList<>();
@@ -160,7 +162,6 @@ public final class ActionManagerImpl extends ActionManagerEx implements Disposab
   private String myLastPreformedActionId;
   private String myPrevPerformedActionId;
   private long myLastTimeEditorWasTypedIn;
-  private boolean myTransparentOnlyUpdate;
   private final Map<OverridingAction, AnAction> myBaseActions = new HashMap<>();
   private int myAnonymousGroupIdCounter;
 
@@ -433,39 +434,21 @@ public final class ActionManagerImpl extends ActionManagerEx implements Disposab
   }
 
   @Override
-  public void addTimerListener(int delay, @NotNull final TimerListener listener) {
-    _addTimerListener(listener, false);
-  }
-
-  @Override
-  public void removeTimerListener(@NotNull TimerListener listener) {
-    _removeTimerListener(listener, false);
-  }
-
-  @Override
-  public void addTransparentTimerListener(int delay, @NotNull TimerListener listener) {
-    _addTimerListener(listener, true);
-  }
-
-  @Override
-  public void removeTransparentTimerListener(@NotNull TimerListener listener) {
-    _removeTimerListener(listener, true);
-  }
-
-  private void _addTimerListener(final TimerListener listener, boolean transparent) {
+  public void addTimerListener(int unused, @NotNull final TimerListener listener) {
     if (ApplicationManager.getApplication().isUnitTestMode()) return;
     if (myTimer == null) {
       myTimer = new MyTimer();
       myTimer.start();
     }
 
-    myTimer.addTimerListener(listener, transparent);
+    myTimer.listeners.add(listener);
   }
 
-  private void _removeTimerListener(TimerListener listener, boolean transparent) {
+  @Override
+  public void removeTimerListener(@NotNull TimerListener listener) {
     if (ApplicationManager.getApplication().isUnitTestMode()) return;
     if (LOG.assertTrue(myTimer != null)) {
-      myTimer.removeTimerListener(listener, transparent);
+      myTimer.listeners.remove(listener);
     }
   }
 
@@ -544,6 +527,9 @@ public final class ActionManagerImpl extends ActionManagerEx implements Disposab
           break;
         case UNREGISTER_ELEMENT_NAME:
           processUnregisterNode(element, plugin.getPluginId());
+          break;
+        case PROHIBIT_ELEMENT_NAME:
+          processProhibitNode(element, plugin.getPluginId());
           break;
         default:
           LOG.error(new PluginException("Unexpected name of element" + element.getName(), plugin.getPluginId()));
@@ -659,6 +645,11 @@ public final class ActionManagerImpl extends ActionManagerEx implements Disposab
 
     // read ID and register loaded action
     String id = obtainActionId(element, className);
+    synchronized (myLock) {
+      if (myProhibitedActionIds.contains(id)) {
+        return null;
+      }
+    }
     if (Boolean.parseBoolean(element.getAttributeValue(INTERNAL_ATTR_NAME)) &&
         !ApplicationManager.getApplication().isInternal()) {
       myNotRegisteredInternalActionIds.add(id);
@@ -736,6 +727,9 @@ public final class ActionManagerImpl extends ActionManagerEx implements Disposab
                                             @NotNull AnAction action,
                                             @NotNull IdeaPluginDescriptor plugin) {
     synchronized (myLock) {
+      if (myProhibitedActionIds.contains(id)) {
+        return;
+      }
       if (Boolean.parseBoolean(element.getAttributeValue(OVERRIDES_ATTR_NAME))) {
         if (getActionOrStub(id) == null) {
           LOG.error(element.getName() + " '" + id + "' doesn't override anything");
@@ -777,6 +771,11 @@ public final class ActionManagerImpl extends ActionManagerEx implements Disposab
       if (id != null && id.isEmpty()) {
         reportActionError(plugin.getPluginId(), "ID of the group cannot be an empty string");
         return null;
+      }
+      synchronized (myLock) {
+        if (myProhibitedActionIds.contains(id)) {
+          return null;
+        }
       }
 
       ActionGroup group;
@@ -1073,6 +1072,16 @@ public final class ActionManagerImpl extends ActionManagerEx implements Disposab
     return text != null ? new Separator(text) : Separator.getInstance();
   }
 
+  private void processProhibitNode(Element element, PluginId pluginId) {
+    String id = element.getAttributeValue(ID_ATTR_NAME);
+    if (id == null) {
+      reportActionError(pluginId, "'id' attribute is required for 'unregister' elements");
+      return;
+    }
+
+    prohibitAction(id);
+  }
+
   private void processUnregisterNode(Element element, PluginId pluginId) {
     String id = element.getAttributeValue(ID_ATTR_NAME);
     if (id == null) {
@@ -1152,6 +1161,12 @@ public final class ActionManagerImpl extends ActionManagerEx implements Disposab
     if (ref == null || ref.isEmpty()) {
       reportActionError(pluginId, "ID of reference element should be defined", null);
       return null;
+    }
+
+    synchronized (myLock) {
+      if (myProhibitedActionIds.contains(ref)) {
+        return null;
+      }
     }
 
     AnAction action = getActionImpl(ref, true);
@@ -1264,6 +1279,9 @@ public final class ActionManagerImpl extends ActionManagerEx implements Disposab
                              @Nullable PluginId pluginId,
                              @Nullable String projectType) {
     synchronized (myLock) {
+      if (myProhibitedActionIds.contains(actionId)) {
+        return;
+      }
       if (addToMap(actionId, action, pluginId, projectType) == null) return;
       if (actionToId.containsKey(action)) {
         reportActionError(pluginId,
@@ -1397,6 +1415,29 @@ public final class ActionManagerImpl extends ActionManagerEx implements Disposab
     }
   }
 
+  /**
+   * Unregisters already registered action and prevents the action from being registered in future.
+   * Should be used only in IDE configuration
+   */
+  @ApiStatus.Internal
+  public void prohibitAction(@NotNull String actionId) {
+    synchronized (myLock) {
+      myProhibitedActionIds.add(actionId);
+    }
+    AnAction action = getAction(actionId);
+    if (action != null) {
+      AbbreviationManager.getInstance().removeAllAbbreviations(actionId);
+      unregisterAction(actionId);
+    }
+  }
+
+  @TestOnly
+  public void resetProhibitedActions() {
+    synchronized (myLock) {
+      myProhibitedActionIds.clear();
+    }
+  }
+
   @NotNull
   @Override
   public Comparator<String> getRegistrationOrderComparator() {
@@ -1449,11 +1490,6 @@ public final class ActionManagerImpl extends ActionManagerEx implements Disposab
   }
 
   @Override
-  public boolean isTransparentOnlyActionsUpdateNow() {
-    return myTransparentOnlyUpdate;
-  }
-
-  @Override
   public void addActionPopupMenuListener(@NotNull ActionPopupMenuListener listener, @NotNull Disposable parentDisposable) {
     myActionPopupMenuListeners.add(listener);
     Disposer.register(parentDisposable, () -> myActionPopupMenuListeners.remove(listener));
@@ -1467,6 +1503,12 @@ public final class ActionManagerImpl extends ActionManagerEx implements Disposab
   }
 
   private AnAction replaceAction(@NotNull String actionId, @NotNull AnAction newAction, @Nullable PluginId pluginId) {
+    synchronized (myLock) {
+      if (myProhibitedActionIds.contains(actionId)) {
+        return null;
+      }
+    }
+
     AnAction oldAction = newAction instanceof OverridingAction ? getAction(actionId) : getActionOrStub(actionId);
     if (oldAction != null) {
       if (newAction instanceof OverridingAction) {
@@ -1731,8 +1773,7 @@ public final class ActionManagerImpl extends ActionManagerEx implements Disposab
   }
 
   private final class MyTimer extends Timer implements ActionListener {
-    private final List<TimerListener> myTimerListeners = ContainerUtil.createLockFreeCopyOnWriteList();
-    private final List<TimerListener> myTransparentTimerListeners = ContainerUtil.createLockFreeCopyOnWriteList();
+    final List<TimerListener> listeners = ContainerUtil.createLockFreeCopyOnWriteList();
     private int myLastTimePerformed;
 
     private MyTimer() {
@@ -1759,14 +1800,6 @@ public final class ActionManagerImpl extends ActionManagerEx implements Disposab
       return "Action manager timer";
     }
 
-    void addTimerListener(@NotNull TimerListener listener, boolean transparent) {
-      (transparent ? myTransparentTimerListeners : myTimerListeners).add(listener);
-    }
-
-    void removeTimerListener(@NotNull TimerListener listener, boolean transparent) {
-      (transparent ? myTransparentTimerListeners : myTimerListeners).remove(listener);
-    }
-
     @Override
     public void actionPerformed(ActionEvent e) {
       if (myLastTimeEditorWasTypedIn + UPDATE_DELAY_AFTER_TYPING > System.currentTimeMillis()) {
@@ -1776,33 +1809,11 @@ public final class ActionManagerImpl extends ActionManagerEx implements Disposab
       final int lastEventCount = myLastTimePerformed;
       myLastTimePerformed = ActivityTracker.getInstance().getCount();
 
-      if (myLastTimePerformed == lastEventCount && !Registry.is("actionSystem.always.update.toolbar.actions")) {
+      if (myLastTimePerformed == lastEventCount) {
         return;
       }
-
-      boolean transparentOnly = myLastTimePerformed == lastEventCount;
-
-      try {
-        myTransparentOnlyUpdate = transparentOnly;
-        Set<TimerListener> notified = new HashSet<>();
-        notifyListeners(myTransparentTimerListeners, notified);
-
-        if (transparentOnly) {
-          return;
-        }
-
-        notifyListeners(myTimerListeners, notified);
-      }
-      finally {
-        myTransparentOnlyUpdate = false;
-      }
-    }
-
-    private void notifyListeners(final List<? extends TimerListener> timerListeners, final Set<? super TimerListener> notified) {
-      for (TimerListener listener : timerListeners) {
-        if (notified.add(listener)) {
-          runListenerAction(listener);
-        }
+      for (TimerListener listener : listeners) {
+        runListenerAction(listener);
       }
     }
 

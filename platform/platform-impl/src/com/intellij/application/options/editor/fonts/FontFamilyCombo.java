@@ -7,7 +7,6 @@ import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.editor.impl.FontFamilyService;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.openapi.util.NlsSafe;
-import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.AbstractFontCombo;
 import com.intellij.ui.ColoredListCellRenderer;
 import com.intellij.ui.JBColor;
@@ -23,16 +22,20 @@ import java.awt.*;
 import java.util.List;
 import java.util.*;
 
-public class FontFamilyCombo extends AbstractFontCombo<FontFamilyCombo.MyFontItem> {
+class FontFamilyCombo extends AbstractFontCombo<FontFamilyCombo.MyFontItem> {
+
+  public static final int ITEM_WIDTH = 230;
+
   private final Dimension myItemSize;
   private final boolean myIsPrimary;
 
   protected FontFamilyCombo(boolean isPrimary) {
     super(new MyModel(!isPrimary));
+    setSwingPopup(false);
     myIsPrimary = isPrimary;
     setRenderer(new MyListCellRenderer());
     FontMetrics fontMetrics = getFontMetrics(getFont());
-    myItemSize = new Dimension(fontMetrics.stringWidth(StringUtil.repeat("M", 20)), fontMetrics.getHeight());
+    myItemSize = new Dimension(JBUI.scale(ITEM_WIDTH), fontMetrics.getHeight());
   }
 
   @Override
@@ -89,6 +92,10 @@ public class FontFamilyCombo extends AbstractFontCombo<FontFamilyCombo.MyFontIte
     public @NotNull String getFamilyName() {
       return myFamilyName;
     }
+
+    public boolean isSelectable() {
+      return true;
+    }
   }
 
   private static class MyNoFontItem extends MyFontItem {
@@ -102,6 +109,11 @@ public class FontFamilyCombo extends AbstractFontCombo<FontFamilyCombo.MyFontIte
 
     private MySeparatorItem(@NotNull String title, boolean isMonospaced) {
       super(title, isMonospaced);
+    }
+
+    @Override
+    public boolean isSelectable() {
+      return false;
     }
   }
 
@@ -159,7 +171,7 @@ public class FontFamilyCombo extends AbstractFontCombo<FontFamilyCombo.MyFontIte
         mySelectedItem = myNoFontItem;
       }
       else if (anItem instanceof String) {
-        mySelectedItem = ContainerUtil.find(myItems, item -> item.myFamilyName.equals(anItem));
+        mySelectedItem = ContainerUtil.find(myItems, item -> item.isSelectable() && item.myFamilyName.equals(anItem));
       }
       else if (anItem instanceof MySeparatorItem) {
         return;

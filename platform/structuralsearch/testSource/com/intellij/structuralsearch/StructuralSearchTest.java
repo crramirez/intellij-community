@@ -2108,17 +2108,23 @@ public class StructuralSearchTest extends StructuralSearchTestCase {
     assertEquals(0, findMatchesCount(s1,s2));
   }
 
-  public void testSuperExpressionShouldNotMatch() {
+  public void testFindRecursiveCall() {
     String source = "class X {\n" +
                     "  void x() {\n" +
                     "     y();\n" +
                     "  }\n" +
-                    "  void y() {}\n" +
+                    "  void y() {}" +
+                    "  void z() {" +
+                    "    z();" +
+                    "  }" +
+                    "  void a() {" +
+                    "    a();" +
+                    "  }\n" +
                     "}";
     String pattern = "void '_a() {" +
                      "  '_a();" +
                      "}";
-    assertEquals(0, findMatchesCount(source, pattern));
+    assertEquals(2, findMatchesCount(source, pattern));
   }
 
   public void testDownUpMatch() {
@@ -2684,6 +2690,7 @@ public class StructuralSearchTest extends StructuralSearchTestCase {
 
   private CompiledPattern compilePattern(String criteria, boolean checkForErrors) {
     options.fillSearchCriteria(criteria);
+    options.setFileType(JavaFileType.INSTANCE);
     return PatternCompiler.compilePattern(getProject(), options, checkForErrors, false);
   }
 

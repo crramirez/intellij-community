@@ -37,6 +37,7 @@ import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.PairFunction;
 import com.intellij.util.SmartList;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -274,7 +275,7 @@ public final class PsiImplUtil {
     }
     final PsiTypeParameter[] typeParameters = classClass.getTypeParameters();
     if (typeParameters.length == 1) {
-      substitutor = substitutor.put(typeParameters[0], operandType);
+      substitutor = substitutor.put(typeParameters[0], operandType instanceof PsiClassType ? ((PsiClassType)operandType).rawType() : operandType);
     }
 
     return new PsiImmediateClassType(classClass, substitutor);
@@ -300,24 +301,6 @@ public final class PsiImplUtil {
     return null;
   }
 
-  /** @deprecated use {@link AnnotationTargetUtil#findAnnotationTarget(PsiAnnotation, PsiAnnotation.TargetType...)} (to be removed ion IDEA 17) */
-  @Deprecated
-  public static PsiAnnotation.TargetType findApplicableTarget(@NotNull PsiAnnotation annotation, PsiAnnotation.TargetType @NotNull ... types) {
-    return AnnotationTargetUtil.findAnnotationTarget(annotation, types);
-  }
-
-  /** @deprecated use {@link AnnotationTargetUtil#findAnnotationTarget(PsiClass, PsiAnnotation.TargetType...)} (to be removed ion IDEA 17) */
-  @Deprecated
-  public static PsiAnnotation.TargetType findApplicableTarget(@NotNull PsiClass annotationType, PsiAnnotation.TargetType @NotNull ... types) {
-    return AnnotationTargetUtil.findAnnotationTarget(annotationType, types);
-  }
-
-  /** @deprecated use {@link AnnotationTargetUtil#getTargetsForLocation(PsiAnnotationOwner)} (to be removed ion IDEA 17) */
-  @Deprecated
-  public static PsiAnnotation.TargetType @NotNull [] getTargetsForLocation(@Nullable PsiAnnotationOwner owner) {
-    return AnnotationTargetUtil.getTargetsForLocation(owner);
-  }
-
   @Nullable
   public static ASTNode findDocComment(@NotNull CompositeElement element) {
     TreeElement node = element.getFirstChildNode();
@@ -332,6 +315,7 @@ public final class PsiImplUtil {
    * @deprecated types should be proceed by the callers themselves
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static PsiType normalizeWildcardTypeByPosition(@NotNull PsiType type, @NotNull PsiExpression expression) {
     PsiUtil.ensureValidType(type);
 

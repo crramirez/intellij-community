@@ -55,7 +55,7 @@ public class PivotalTrackerRepository extends NewBaseRepositoryImpl {
                                                                           "unscheduled");
 
   // @formatter:off
-  private static final TypeToken<List<PivotalTrackerStory>> LIST_OF_STORIES_TYPE = new TypeToken<List<PivotalTrackerStory>>() {};
+  private static final TypeToken<List<PivotalTrackerStory>> LIST_OF_STORIES_TYPE = new TypeToken<>() {};
   // @formatter:on
 
   public static final Gson ourGson = TaskGsonUtil.createDefaultBuilder().create();
@@ -198,28 +198,6 @@ public class PivotalTrackerRepository extends NewBaseRepositoryImpl {
 
   public void setProjectId(final String projectId) {
     myProjectId = projectId;
-  }
-
-  /**
-   * Don't use this getter, it's left only to preserve compatibility with existing settings.
-   * Actual API token is saved in Password Safe and accessible via {@link #getPassword()}.
-   *
-   * @deprecated Use {@link #getPassword()}
-   */
-  @Deprecated
-  public String getAPIKey() {
-    return null;
-  }
-
-  /**
-   * Don't use this setter, it's left only to preserve compatibility with existing settings.
-   * Actual API token is saved in Password Safe and accessible via {@link #getPassword()}.
-   *
-   * @deprecated Use {@link #setPassword(String)}
-   */
-  @Deprecated
-  public void setAPIKey(final String APIKey) {
-    setPassword(APIKey);
   }
 
   @Override

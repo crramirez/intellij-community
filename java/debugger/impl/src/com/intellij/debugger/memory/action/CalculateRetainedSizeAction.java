@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.debugger.memory.action;
 
 import com.intellij.debugger.JavaDebuggerBundle;
@@ -54,6 +54,7 @@ public class CalculateRetainedSizeAction extends DebuggerTreeAction {
           EvaluationContextImpl evaluationContext = new EvaluationContextImpl(suspendContext, suspendContext.getFrameProxy());
           MemoryAgent memoryAgent = MemoryAgent.get(debugProcess);
           Disposer.register(dialog.getDisposable(), () -> memoryAgent.cancelAction());
+          memoryAgent.setProgressIndicator(dialog.createProgressIndicator());
           MemoryAgentActionResult<Pair<long[], ObjectReference[]>> result = memoryAgent.estimateObjectSize(
             evaluationContext, reference, Registry.get("debugger.memory.agent.action.timeout").asInteger()
           );
@@ -74,7 +75,7 @@ public class CalculateRetainedSizeAction extends DebuggerTreeAction {
           }
         }
         catch (EvaluateException e) {
-          XDebuggerManagerImpl.NOTIFICATION_GROUP.createNotification(JavaDebuggerBundle.message("action.failed"), NotificationType.ERROR);
+          XDebuggerManagerImpl.getNotificationGroup().createNotification(JavaDebuggerBundle.message("action.failed"), NotificationType.ERROR);
         }
       }
 
@@ -89,12 +90,12 @@ public class CalculateRetainedSizeAction extends DebuggerTreeAction {
   protected boolean isEnabled(@NotNull XValueNodeImpl node, @NotNull AnActionEvent e) {
     if (!super.isEnabled(node, e)) return false;
     DebugProcessImpl debugProcess = JavaDebugProcess.getCurrentDebugProcess(node.getTree().getProject());
-    if (debugProcess == null || !debugProcess.isEvaluationPossible() || !MemoryAgent.get(debugProcess).capabilities().isLoaded()) {
+    if (debugProcess == null || !debugProcess.isEvaluationPossible() || !MemoryAgent.get(debugProcess).getCapabilities().isLoaded()) {
       e.getPresentation().setVisible(false);
       return false;
     }
 
     ObjectReference reference = getObjectReference(node);
-    return reference != null && MemoryAgent.get(debugProcess).capabilities().canEstimateObjectSize();
+    return reference != null && MemoryAgent.get(debugProcess).getCapabilities().canEstimateObjectSize();
   }
 }

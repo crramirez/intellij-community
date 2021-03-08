@@ -11,10 +11,7 @@ import com.intellij.internal.statistic.service.fus.collectors.UIEventLogger;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.actionSystem.ex.ToolbarLabelAction;
 import com.intellij.openapi.actionSystem.impl.ActionButton;
-import com.intellij.openapi.editor.Document;
-import com.intellij.openapi.editor.EditorFactory;
-import com.intellij.openapi.editor.EditorSettings;
-import com.intellij.openapi.editor.ScrollType;
+import com.intellij.openapi.editor.*;
 import com.intellij.openapi.editor.colors.EditorColors;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.ex.EditorEx;
@@ -50,10 +47,7 @@ import com.intellij.util.IconUtil;
 import com.intellij.util.PairFunction;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
-import org.jetbrains.annotations.NonNls;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.TestOnly;
+import org.jetbrains.annotations.*;
 
 import javax.swing.*;
 import java.awt.*;
@@ -66,6 +60,7 @@ public class ImplementationViewComponent extends JPanel {
   @NonNls private static final String TEXT_PAGE_KEY = "Text";
   @NonNls private static final String BINARY_PAGE_KEY = "Binary";
   private static final String IMPLEMENTATION_VIEW_PLACE = "ImplementationView";
+  public static final int FILE_CHOOSER_WIDTH = 250;
   private final EditorFactory factory;
   private final Project project;
 
@@ -94,7 +89,8 @@ public class ImplementationViewComponent extends JPanel {
     return myElements != null && myElements.length > 0;
   }
 
-  private static class FileDescriptor {
+  @ApiStatus.Internal
+  public static class FileDescriptor {
     @NotNull public final VirtualFile myFile;
     public final ImplementationViewElement myElement;
 
@@ -116,7 +112,7 @@ public class ImplementationViewComponent extends JPanel {
     factory = EditorFactory.getInstance();
     Document doc = factory.createDocument("");
     doc.setReadOnly(true);
-    myEditor = (EditorEx)factory.createEditor(doc, project);
+    myEditor = (EditorEx)factory.createEditor(doc, project, EditorKind.PREVIEW);
     tuneEditor();
 
     myBinarySwitch = new CardLayout();
@@ -149,7 +145,7 @@ public class ImplementationViewComponent extends JPanel {
       mySingleEntryPanel = new JPanel(new BorderLayout());
       toolbarPanel.add(mySingleEntryPanel, gc);
 
-      myFileChooser = new ComboBox<>(fileDescriptors.toArray(new FileDescriptor[0]), 250);
+      myFileChooser = new ComboBox<>(fileDescriptors.toArray(new FileDescriptor[0]), FILE_CHOOSER_WIDTH);
       myFileChooser.setOpaque(false);
       myFileChooser.addActionListener(e -> {
         int index1 = myFileChooser.getSelectedIndex();
@@ -351,7 +347,7 @@ public class ImplementationViewComponent extends JPanel {
   }
 
   private static void update(@NotNull Collection<? extends ImplementationViewElement> elements,
-                             @NotNull PairFunction<ImplementationViewElement[], ? super List<FileDescriptor>, Boolean> fun) {
+                             @NotNull PairFunction<? super ImplementationViewElement[], ? super List<FileDescriptor>, Boolean> fun) {
     List<ImplementationViewElement> candidates = new ArrayList<>(elements.size());
     List<FileDescriptor> files = new ArrayList<>(elements.size());
     final Set<String> names = new HashSet<>();
@@ -379,12 +375,28 @@ public class ImplementationViewComponent extends JPanel {
     fun.fun(candidates.toArray(new ImplementationViewElement[0]), files);
   }
 
-  private static Icon getIconForFile(VirtualFile virtualFile, Project project) {
+  public static Icon getIconForFile(VirtualFile virtualFile, Project project) {
     return IconUtil.getIcon(virtualFile, 0, project);
   }
 
   public JComponent getPreferredFocusableComponent() {
     return myElements.length > 1 ? myFileChooser : myEditor.getContentComponent();
+  }
+
+  public ActionToolbar getToolbar() {
+    return myToolbar;
+  }
+
+  public ComboBox<FileDescriptor> getFileChooserComboBox() {
+    return myFileChooser;
+  }
+
+  public JPanel getSingleEntryPanel() {
+    return mySingleEntryPanel;
+  }
+
+  public JPanel getViewingPanel() {
+    return myViewingPanel;
   }
 
   private void updateControls() {
@@ -436,7 +448,7 @@ public class ImplementationViewComponent extends JPanel {
   private void replaceEditor(Project project, VirtualFile vFile, ImplementationViewDocumentFactory documentFactory, Document document) {
     myViewingPanel.remove(myEditor.getComponent());
     factory.releaseEditor(myEditor);
-    myEditor = (EditorEx)factory.createEditor(document, project);
+    myEditor = (EditorEx)factory.createEditor(document, project, EditorKind.PREVIEW);
     tuneEditor(vFile);
     documentFactory.tuneEditorBeforeShow(myEditor);
     myViewingPanel.add(myEditor.getComponent(), TEXT_PAGE_KEY);

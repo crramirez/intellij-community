@@ -9,7 +9,10 @@ import com.intellij.codeInsight.hint.TooltipGroup;
 import com.intellij.codeInsight.hint.TooltipRenderer;
 import com.intellij.ide.IdeBundle;
 import com.intellij.ide.IdeEventQueue;
-import com.intellij.ide.dnd.*;
+import com.intellij.ide.dnd.DnDDragStartBean;
+import com.intellij.ide.dnd.DnDImage;
+import com.intellij.ide.dnd.DnDNativeTarget;
+import com.intellij.ide.dnd.DnDSupport;
 import com.intellij.ide.ui.UISettings;
 import com.intellij.ide.ui.customization.CustomActionsSchema;
 import com.intellij.internal.statistic.eventLog.FeatureUsageData;
@@ -61,7 +64,6 @@ import com.intellij.ui.scale.JBUIScale;
 import com.intellij.ui.scale.ScaleContext;
 import com.intellij.util.BitUtil;
 import com.intellij.util.IconUtil;
-import com.intellij.util.NullableFunction;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.*;
@@ -260,7 +262,7 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx implements
         }
         return true;
       })
-      .setImageProvider((NullableFunction<DnDActionInfo, DnDImage>)info -> {
+      .setImageProvider(info -> {
         // [tav] temp workaround for JRE-224
         boolean inUserScale = !SystemInfo.isWindows || !StartupUiUtil.isJreHiDPI(myEditor.getComponent());
         Image image = ImageUtil.toBufferedImage(getDragImage(getGutterRenderer(info.getPoint())), inUserScale);
@@ -829,7 +831,9 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx implements
     if (outerContainer == null) return;
 
     EditorSettings settings = myEditor.getSettings();
-    int rightMargin = settings.getRightMargin(myEditor.getProject());
+    Project project = myEditor.getProject();
+    if (project != null && project.isDisposed()) return;
+    int rightMargin = settings.getRightMargin(project);
     if (rightMargin <= 0) return;
 
     JComponent editorComponent = myEditor.getComponent();
@@ -1918,7 +1922,7 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx implements
 
   private boolean isDumbMode() {
     Project project = myEditor.getProject();
-    return project != null && DumbService.isDumb(project);
+    return project != null && !project.isDisposed() && DumbService.isDumb(project);
   }
 
   private boolean checkDumbAware(@NotNull Object possiblyDumbAware) {
@@ -1942,7 +1946,7 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx implements
     AnActionEvent actionEvent = AnActionEvent.createFromAnAction(action, e, place, context);
     action.update(actionEvent);
     if (actionEvent.getPresentation().isEnabledAndVisible()) {
-      ActionUtil.performActionDumbAwareWithCallbacks(action, actionEvent, context);
+      ActionUtil.performActionDumbAwareWithCallbacks(action, actionEvent);
     }
   }
 
@@ -2067,6 +2071,11 @@ final class EditorGutterComponentImpl extends EditorGutterComponentEx implements
   @Override
   public void setGutterPopupGroup(@Nullable ActionGroup group) {
     myCustomGutterPopupGroup = group;
+  }
+
+  @Override
+  public boolean isPaintBackground() {
+    return myPaintBackground;
   }
 
   @Override

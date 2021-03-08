@@ -14,7 +14,7 @@ import com.intellij.openapi.application.Experiments
 import com.intellij.openapi.application.ex.ApplicationManagerEx
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.StartupActivity
-import com.intellij.openapi.updateSettings.impl.pluginsAdvertisement.PluginsAdvertiser
+import com.intellij.openapi.updateSettings.impl.pluginsAdvertisement.installAndEnable
 import java.util.*
 
 class LanguageDetector : StartupActivity.Background {
@@ -33,19 +33,23 @@ class LanguageDetector : StartupActivity.Background {
     }
 
     private fun getFeatures(languageTag: String): List<FeatureImpl> {
-      val build = MarketplaceRequests.getInstance().getBuildForPluginRepositoryRequests()
+      val build = MarketplaceRequests.Instance.getBuildForPluginRepositoryRequests()
       val params = mapOf("featureType" to "com.intellij.locale", "implementationName" to languageTag, "build" to build)
-      return MarketplaceRequests.getInstance().getFeatures(params)
+      return MarketplaceRequests.Instance.getFeatures(params)
     }
 
-    private fun verifiedLanguagePlugins() = MarketplaceRequests.getInstance().searchPlugins("tags=Language%20Pack", 10)
+    private fun verifiedLanguagePlugins() = MarketplaceRequests.Instance.searchPlugins("tags=Language%20Pack", 10)
 
     private fun installAction(project: Project, matchedVerifiedPlugin: PluginNode, notification: Notification) =
       NotificationAction.create(ApplicationBundle.message("notification.action.language.plugin.install.and.enable")) { _, _ ->
-        PluginsAdvertiser.installAndEnable(project, setOf(matchedVerifiedPlugin.pluginId), false, Runnable {
+        installAndEnable(
+          project,
+          setOf(matchedVerifiedPlugin.pluginId),
+          false,
+        ) {
           notification.expire()
           ApplicationManagerEx.getApplicationEx().restart(true)
-        })
+        }
       }
 
     private fun findPlugin() = verifiedLanguagePlugins()

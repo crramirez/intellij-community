@@ -38,7 +38,10 @@ import com.intellij.util.messages.MessageBusConnection;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.accessibility.AccessibleContextUtil;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.SystemIndependent;
 
 import javax.swing.*;
 import javax.swing.border.LineBorder;
@@ -201,10 +204,10 @@ public class RecentProjectPanel extends JPanel {
   @NotNull
   private AnAction performSelectedAction(@NotNull InputEvent event, AnAction selection) {
     String actionPlace = UIUtil.uiParents(myList, true).filter(FlatWelcomeFrame.class).isEmpty() ? ActionPlaces.POPUP : ActionPlaces.WELCOME_SCREEN;
-    AnActionEvent actionEvent = AnActionEvent
-      .createFromInputEvent(event, actionPlace, selection.getTemplatePresentation(),
-                            DataManager.getInstance().getDataContext(myList), false, false);
-    ActionUtil.performActionDumbAwareWithCallbacks(selection, actionEvent, actionEvent.getDataContext());
+    AnActionEvent actionEvent = AnActionEvent.createFromInputEvent(
+      event, actionPlace, selection.getTemplatePresentation(),
+      DataManager.getInstance().getDataContext(myList), false, false);
+    ActionUtil.performActionDumbAwareWithCallbacks(selection, actionEvent);
     return selection;
   }
 
@@ -353,10 +356,26 @@ public class RecentProjectPanel extends JPanel {
         final int index = locationToIndex(myMousePoint);
         if (index != -1) {
           final Rectangle iconRect = getCloseIconRect(index);
-          Icon icon = toSize(iconRect.contains(myMousePoint) ? AllIcons.Ide.Notification.GearHover : AllIcons.Ide.Notification.Gear);
+          Icon actionIcon = detectActionIcon(index, iconRect.contains(myMousePoint));
+          Icon icon = toSize(actionIcon);
           icon.paintIcon(this, g, iconRect.x, iconRect.y);
         }
       }
+    }
+
+    private Icon detectActionIcon(int rowIndex, boolean hovered) {
+      if (isProjectInvalid(rowIndex)) {
+        return hovered ? AllIcons.Welcome.Project.RemoveHover : AllIcons.Welcome.Project.Remove;
+      }
+      return hovered ? AllIcons.Ide.Notification.GearHover : AllIcons.Ide.Notification.Gear;
+    }
+
+    private boolean isProjectInvalid(int listIndex) {
+      AnAction action = myList.getModel().getElementAt(listIndex);
+      if (action instanceof ReopenProjectAction) {
+        return !isPathValid((((ReopenProjectAction)action).getProjectPath()));
+      }
+      return false;
     }
 
     @Override
@@ -405,8 +424,13 @@ public class RecentProjectPanel extends JPanel {
         Point point = e.getPoint();
         int index = locationToIndex(point);
         if (index == -1 || !getCloseIconRect(index).contains(point)) return;
-
-        invokePopup(e.getComponent(), e.getX(), e.getY());
+        if (isProjectInvalid(index)) {
+          removeRecentProjectElement(getModel().getElementAt(index));
+          ListUtil.removeItem(getModel(), index);
+        }
+        else {
+          invokePopup(e.getComponent(), e.getX(), e.getY());
+        }
         e.consume();
       }
 
@@ -428,13 +452,6 @@ public class RecentProjectPanel extends JPanel {
     protected final JLabel myName = new JLabel();
     protected final JLabel myPath = ComponentPanelBuilder.createNonWrappingCommentComponent("");
     protected boolean myHovered;
-
-    /** @deprecated use the default constructor */
-    @Deprecated
-    @ApiStatus.ScheduledForRemoval(inVersion = "2020.2")
-    protected RecentProjectItemRenderer(@SuppressWarnings("unused") UniqueNameBuilder<ReopenProjectAction> pathShortener) {
-      this();
-    }
 
     protected RecentProjectItemRenderer() {
       super(new VerticalFlowLayout());

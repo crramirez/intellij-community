@@ -114,14 +114,14 @@ public final class TabInfo implements Queryable, PlaceProvider {
   @NotNull
   private SimpleTextAttributes getDefaultAttributes() {
     if (myDefaultAttributes == null) {
+      int style = (myDefaultStyle != -1 ? myDefaultStyle : SimpleTextAttributes.STYLE_PLAIN)
+                  | SimpleTextAttributes.STYLE_USE_EFFECT_COLOR;
       if (editorAttributes != null) {
         SimpleTextAttributes attr = SimpleTextAttributes.fromTextAttributes(editorAttributes);
-        attr = SimpleTextAttributes.merge(new SimpleTextAttributes(SimpleTextAttributes.STYLE_USE_EFFECT_COLOR, attr.getFgColor()), attr);
-        myDefaultAttributes = (myDefaultStyle != -1) ?
-                              new SimpleTextAttributes(attr.getBgColor(), attr.getFgColor(), attr.getWaveColor(), myDefaultStyle) : attr;
+        attr = SimpleTextAttributes.merge(new SimpleTextAttributes(style, myDefaultForeground), attr);
+        myDefaultAttributes = attr;
       }
       else {
-        int style = myDefaultStyle != -1 ? myDefaultStyle : SimpleTextAttributes.STYLE_PLAIN;
         myDefaultAttributes = new SimpleTextAttributes(style, myDefaultForeground);
       }
     }
@@ -409,7 +409,7 @@ public final class TabInfo implements Queryable, PlaceProvider {
   }
 
   @Override
-  public void putInfo(@NotNull Map<String, String> info) {
+  public void putInfo(@NotNull Map<? super String, ? super String> info) {
     if (myQueryable != null) {
       myQueryable.putInfo(info);
     }

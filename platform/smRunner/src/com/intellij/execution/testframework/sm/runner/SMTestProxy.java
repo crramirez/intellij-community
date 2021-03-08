@@ -675,14 +675,6 @@ public class SMTestProxy extends AbstractTestProxy {
     });
   }
 
-  /**
-   * @deprecated use {@link #addOutput(String, Key)}
-   */
-  @Deprecated
-  public void addStdOutput(final String output, final Key outputType) {
-    addOutput(output, outputType);
-  }
-
   public final void addStdOutput(@NotNull String output) {
     addOutput(output, ProcessOutputTypes.STDOUT);
   }
@@ -748,7 +740,7 @@ public class SMTestProxy extends AbstractTestProxy {
     }
 
     if (myState instanceof CompoundTestFailedState) {
-      return ((CompoundTestFailedState)myState).getHyperlinks().get(0);
+      return ContainerUtil.getFirstItem(((CompoundTestFailedState)myState).getHyperlinks());
     }
 
     return null;

@@ -5,14 +5,13 @@ import com.intellij.codeInsight.Nullability
 import com.intellij.codeInsight.highlighting.HighlightManager
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.java.refactoring.JavaRefactoringBundle
-import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.WriteAction
 import com.intellij.openapi.command.CommandProcessor
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.colors.EditorColors
 import com.intellij.openapi.editor.ex.EditorSettingsExternalizable
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.util.NlsContexts
 import com.intellij.openapi.util.TextRange
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.wm.WindowManager
@@ -29,20 +28,21 @@ import com.intellij.refactoring.extractMethod.newImpl.ExtractMethodHelper.wrapWi
 import com.intellij.refactoring.extractMethod.newImpl.ExtractMethodPipeline.selectTargetClass
 import com.intellij.refactoring.extractMethod.newImpl.ExtractMethodPipeline.withFilteredAnnotations
 import com.intellij.refactoring.extractMethod.newImpl.MapFromDialog.mapFromDialog
-import com.intellij.refactoring.extractMethod.newImpl.inplace.ExtractMethodPopupProvider
-import com.intellij.refactoring.extractMethod.newImpl.inplace.InplaceMethodExtractor
+import com.intellij.refactoring.extractMethod.newImpl.inplace.*
 import com.intellij.refactoring.extractMethod.newImpl.structures.ExtractOptions
 import com.intellij.refactoring.introduceVariable.IntroduceVariableBase
 import com.intellij.refactoring.listeners.RefactoringEventData
 import com.intellij.refactoring.listeners.RefactoringEventListener
 import com.intellij.refactoring.util.CommonRefactoringUtil
+import com.intellij.refactoring.util.ConflictsUtil
 import com.intellij.util.IncorrectOperationException
+import com.intellij.util.containers.MultiMap
 
 class MethodExtractor {
 
   data class ExtractedElements(val callElements: List<PsiElement>, val method: PsiMethod)
 
-  fun doExtract(file: PsiFile, range: TextRange, @NlsContexts.DialogTitle refactoringName: String, helpId: String) {
+  fun doExtract(file: PsiFile, range: TextRange) {
     val project = file.project
     val editor = PsiEditorUtil.findEditor(file) ?: return
     val activeExtractor = InplaceMethodExtractor.getActiveExtractor(editor)
@@ -58,41 +58,71 @@ class MethodExtractor {
       }
       val extractOptions = findExtractOptions(statements)
       selectTargetClass(extractOptions) { options ->
+        val targetClass = options.anchor.containingClass ?: throw IllegalStateException("Failed to find target class")
+        val annotate = PropertiesComponent.getInstance(options.project).getBoolean(ExtractMethodDialog.EXTRACT_METHOD_GENERATE_ANNOTATIONS, false)
+        val parameters = ExtractParameters(targetClass, range, "", annotate, options.isStatic)
+        val extractor = getDefaultInplaceExtractor(options)
         if (Registry.`is`("java.refactoring.extractMethod.inplace") && EditorSettingsExternalizable.getInstance().isVariableInplaceRenameEnabled) {
-          doInplaceExtract(editor, options)
+          val popupSettings = createInplaceSettingsPopup(options)
+          val guessedNames = suggestSafeMethodNames(options)
+          val methodName = guessedNames.first()
+          val suggestedNames = guessedNames.takeIf { it.size > 1 }.orEmpty()
+          doInplaceExtract(editor, extractor, parameters.copy(methodName = methodName), popupSettings, suggestedNames)
         }
         else {
-          doDialogExtract(options)
+          extractor.extractInDialog(parameters)
         }
       }
     }
     catch (e: ExtractException) {
       val message = JavaRefactoringBundle.message("extract.method.error.prefix") + " " + (e.message ?: "")
-      CommonRefactoringUtil.showErrorHint(project, editor, message, refactoringName, helpId)
+      CommonRefactoringUtil.showErrorHint(project, editor, message, ExtractMethodHandler.getRefactoringName(), HelpID.EXTRACT_METHOD)
       showError(editor, e.problems)
     }
   }
 
-  fun doInplaceExtract(editor: Editor, options: ExtractOptions) {
-    executeRefactoringCommand(options.project) {
-      val isStatic = options.isStatic
-      val analyzer = CodeFragmentAnalyzer(options.elements)
-      val optionsWithStatic = ExtractMethodPipeline.withForcedStatic(analyzer, options)
-      val makeStaticAndPassFields = optionsWithStatic?.inputParameters?.size != options.inputParameters.size
-      val showStatic = ! isStatic && optionsWithStatic != null
-      val hasAnnotation = options.dataOutput.nullability != Nullability.UNKNOWN && options.dataOutput.type !is PsiPrimitiveType
-      val annotationAvailable = ExtractMethodHelper.isNullabilityAvailable(options)
-      val defaultPanel = ExtractMethodPopupProvider(
-        annotateDefault = if (hasAnnotation && annotationAvailable) needsNullabilityAnnotations(options.project) else null,
-        makeStaticDefault = if (showStatic) false else null,
-        staticPassFields = makeStaticAndPassFields
-      )
+  fun getDefaultInplaceExtractor(options: ExtractOptions): InplaceExtractMethodProvider {
+    val enabled = Registry.`is`("java.refactoring.extractMethod.newImplementation")
+    val possible = ExtractMethodHandler.canUseNewImpl(options.project, options.anchor.containingFile, options.elements.toTypedArray())
+    return if (enabled && possible) DefaultMethodExtractor() else LegacyMethodExtractor()
+  }
 
-      val guessedMethodNames = guessMethodName(options).ifEmpty { listOf("extracted") }
-      val methodName = guessedMethodNames.first()
-      val suggestions = guessedMethodNames.drop(1)
-      InplaceMethodExtractor(editor, options.copy(methodName = methodName), defaultPanel)
-        .performInplaceRefactoring(LinkedHashSet(suggestions))
+  fun suggestSafeMethodNames(options: ExtractOptions): List<String> {
+    val unsafeNames = guessMethodName(options)
+    val safeNames = unsafeNames.filterNot { name -> hasConflicts(options.copy(methodName = name)) }
+    if (safeNames.isNotEmpty()) return safeNames
+
+    val baseName = unsafeNames.firstOrNull() ?: "extracted"
+    val generatedNames = sequenceOf(baseName) + generateSequence(1) { seed -> seed + 1 }.map { number -> "$baseName$number" }
+    return generatedNames.filterNot { name -> hasConflicts(options.copy(methodName = name)) }.take(1).toList()
+  }
+
+  private fun hasConflicts(options: ExtractOptions): Boolean {
+    val (_, method) = prepareRefactoringElements(options)
+    val conflicts = MultiMap<PsiElement, String>()
+    ConflictsUtil.checkMethodConflicts(options.anchor.containingClass, null, method, conflicts)
+    return ! conflicts.isEmpty
+  }
+
+  fun createInplaceSettingsPopup(options: ExtractOptions): ExtractMethodPopupProvider {
+    val isStatic = options.isStatic
+    val analyzer = CodeFragmentAnalyzer(options.elements)
+    val optionsWithStatic = ExtractMethodPipeline.withForcedStatic(analyzer, options)
+    val makeStaticAndPassFields = optionsWithStatic?.inputParameters?.size != options.inputParameters.size
+    val showStatic = ! isStatic && optionsWithStatic != null
+    val hasAnnotation = options.dataOutput.nullability != Nullability.UNKNOWN && options.dataOutput.type !is PsiPrimitiveType
+    val annotationAvailable = ExtractMethodHelper.isNullabilityAvailable(options)
+    return ExtractMethodPopupProvider(
+      annotateDefault = if (hasAnnotation && annotationAvailable) needsNullabilityAnnotations(options.project) else null,
+      makeStaticDefault = if (showStatic) false else null,
+      staticPassFields = makeStaticAndPassFields
+    )
+  }
+
+  fun doInplaceExtract(editor: Editor, extractor: InplaceExtractMethodProvider, parameters: ExtractParameters, settingsPanel: ExtractMethodPopupProvider, suggestedNames: List<String>) {
+    executeRefactoringCommand(parameters.targetClass.project) {
+      InplaceMethodExtractor(editor, parameters, extractor, settingsPanel)
+        .performInplaceRefactoring(LinkedHashSet(suggestedNames))
     }
   }
 
@@ -125,7 +155,7 @@ class MethodExtractor {
   }
 
   fun replaceElements(sourceElements: List<PsiElement>, callElements: List<PsiElement>, anchor: PsiMember, method: PsiMethod): ExtractedElements {
-    return ApplicationManager.getApplication().runWriteAction<ExtractedElements> {
+    return WriteAction.compute<ExtractedElements, Throwable> {
       val addedMethod = anchor.addSiblingAfter(method) as PsiMethod
       val replacedCallElements = replace(sourceElements, callElements)
       ExtractedElements(replacedCallElements, addedMethod)

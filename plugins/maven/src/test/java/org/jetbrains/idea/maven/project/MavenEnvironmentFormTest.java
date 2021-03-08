@@ -1,10 +1,12 @@
 // Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.idea.maven.project;
 
+import com.intellij.openapi.command.impl.DummyProject;
 import com.intellij.testFramework.UsefulTestCase;
 import com.intellij.ui.TextFieldWithHistory;
 import com.intellij.util.Consumer;
 import com.intellij.util.ReflectionUtil;
+import org.jetbrains.idea.maven.server.MavenDistributionsCache;
 import org.jetbrains.idea.maven.server.MavenServerManager;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -24,7 +26,7 @@ public class MavenEnvironmentFormTest extends UsefulTestCase {
                                        Collections.singleton(MavenServerManager.BUNDLED_MAVEN_3)));
     assertThat(panel,
                t -> assertDoesntContain(t.getHistory(),
-                                           MavenServerManager.resolveEmbeddedMavenHome().getMavenHome().getAbsolutePath()));
+                                        MavenDistributionsCache.resolveEmbeddedMavenHome().getMavenHome().getAbsolutePath()));
   }
 
   @Test
@@ -32,7 +34,7 @@ public class MavenEnvironmentFormTest extends UsefulTestCase {
     MavenGeneralSettings settings = new MavenGeneralSettings();
     MavenGeneralPanel panel = new MavenGeneralPanel();
     settings.setMavenHome(MavenServerManager.BUNDLED_MAVEN_3);
-    panel.getData(settings);
+    panel.initializeFormData(settings,  DummyProject.getInstance());
     assertThat(panel,
                t -> assertEquals("Absolute path to bundled maven should resolve to bundle", MavenServerManager.BUNDLED_MAVEN_3,
                                  t.getText()));
@@ -43,7 +45,7 @@ public class MavenEnvironmentFormTest extends UsefulTestCase {
     MavenGeneralSettings settings = new MavenGeneralSettings();
     MavenGeneralPanel panel = new MavenGeneralPanel();
     settings.setMavenHome("/path/to/maven/home");
-    panel.getData(settings);
+    panel.initializeFormData(settings, DummyProject.getInstance());
     assertThat(panel,
                t -> assertEquals("/path/to/maven/home", t.getText()));
   }

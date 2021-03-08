@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.workspaceModel.ide.impl.legacyBridge.module
 
 import com.google.common.collect.HashBiMap
@@ -16,10 +16,7 @@ import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.projectModel.ProjectModelBundle
 import com.intellij.util.PathUtil
 import com.intellij.util.io.systemIndependentPath
-import com.intellij.workspaceModel.ide.NonPersistentEntitySource
-import com.intellij.workspaceModel.ide.WorkspaceModel
-import com.intellij.workspaceModel.ide.configLocation
-import com.intellij.workspaceModel.ide.getInstance
+import com.intellij.workspaceModel.ide.*
 import com.intellij.workspaceModel.ide.impl.jps.serialization.ErrorReporter
 import com.intellij.workspaceModel.ide.impl.jps.serialization.JpsProjectEntitiesLoader
 import com.intellij.workspaceModel.ide.impl.legacyBridge.LegacyBridgeModifiableBase
@@ -162,7 +159,7 @@ internal class ModifiableModuleModelBridgeImpl(
 
     val builder = WorkspaceEntityStorageBuilder.create()
     var errorMessage: String? = null
-    JpsProjectEntitiesLoader.loadModule(Paths.get(filePath), project.configLocation!!, builder, object : ErrorReporter {
+    JpsProjectEntitiesLoader.loadModule(Paths.get(filePath), getJpsProjectConfigLocation(project)!!, builder, object : ErrorReporter {
       override fun reportError(message: String, file: VirtualFileUrl) {
         errorMessage = message
       }
@@ -176,8 +173,8 @@ internal class ModifiableModuleModelBridgeImpl(
       throw IOException("Failed to load module from $filePath")
     }
 
-    val moduleFilePath = ModuleManagerComponentBridge.getInstance(project).getModuleFilePath(moduleEntity)!!
-    LocalFileSystem.getInstance().refreshAndFindFileByNioFile(moduleFilePath)
+    val moduleFileUrl = ModuleManagerComponentBridge.getInstance(project).getModuleVirtualFileUrl(moduleEntity)!!
+    LocalFileSystem.getInstance().refreshAndFindFileByNioFile(moduleFileUrl.toPath())
     return createModuleInstance(moduleEntity, false)
   }
 

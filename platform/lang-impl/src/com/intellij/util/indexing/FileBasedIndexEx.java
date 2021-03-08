@@ -24,6 +24,7 @@ import com.intellij.psi.util.PsiModificationTracker;
 import com.intellij.util.*;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.Stack;
+import com.intellij.util.indexing.diagnostic.IndexAccessValidator;
 import com.intellij.util.indexing.impl.IndexDebugProperties;
 import com.intellij.util.indexing.impl.InvertedIndexValueIterator;
 import com.intellij.util.indexing.roots.IndexableFilesContributor;
@@ -54,7 +55,7 @@ public abstract class FileBasedIndexEx extends FileBasedIndex {
   public abstract IntPredicate getAccessibleFileIdFilter(@Nullable Project project);
 
   @ApiStatus.Internal
-  public abstract ProjectIndexableFilesFilter projectIndexableFiles(@Nullable Project project);
+  public abstract IdFilter projectIndexableFiles(@Nullable Project project);
 
   @NotNull
   @ApiStatus.Internal
@@ -170,6 +171,19 @@ public abstract class FileBasedIndexEx extends FileBasedIndex {
   }
 
   @Override
+  public <V> @Nullable V getSingleEntryIndexData(@NotNull ID<Integer, V> id,
+                                                 @NotNull VirtualFile virtualFile,
+                                                 @NotNull Project project) {
+    if (!(getIndex(id).getExtension() instanceof SingleEntryFileBasedIndexExtension)) {
+      throw new IllegalArgumentException("'" + id + "' index is not a SingleEntryFileBasedIndex");
+    }
+    Map<Integer, V> data = getFileData(id, virtualFile, project);
+    if (data.isEmpty()) return null;
+    if (data.size() == 1) return data.values().iterator().next();
+    throw new IllegalStateException("Invalid single entry index data '" + id + "'");
+  }
+
+  @Override
   @NotNull
   public <K, V> Collection<VirtualFile> getContainingFiles(@NotNull ID<K, V> indexId,
                                                            @NotNull K dataKey,
@@ -214,7 +228,7 @@ public abstract class FileBasedIndexEx extends FileBasedIndex {
   private <K, V, R> R processExceptions(@NotNull final ID<K, V> indexId,
                                         @Nullable final VirtualFile restrictToFile,
                                         @NotNull final GlobalSearchScope filter,
-                                        @NotNull ThrowableConvertor<? super UpdatableIndex<K, V, FileContent>, ? extends R, ? extends StorageException> computable) {
+                                        @NotNull ThrowableConvertor<? super UpdatableIndex<K, V, FileContent>, ? extends R, StorageException> computable) {
     try {
       waitUntilIndicesAreInitialized();
       UpdatableIndex<K, V, FileContent> index = getIndex(indexId);
@@ -336,7 +350,7 @@ public abstract class FileBasedIndexEx extends FileBasedIndex {
                                                       @NotNull GlobalSearchScope filter,
                                                       @Nullable Condition<? super V> valueChecker,
                                                       @NotNull Processor<? super VirtualFile> processor) {
-    ProjectIndexableFilesFilter filesSet = projectIndexableFiles(filter.getProject());
+    IdFilter filesSet = projectIndexableFiles(filter.getProject());
     IntSet set = collectFileIdsContainingAllKeys(indexId, dataKeys, filter, valueChecker, filesSet, null);
     return set != null && processVirtualFiles(set, filter, processor);
   }
@@ -347,7 +361,7 @@ public abstract class FileBasedIndexEx extends FileBasedIndex {
                                                @NotNull GlobalSearchScope filter,
                                                @NotNull Processor<? super VirtualFile> processor) {
     Project project = filter.getProject();
-    ProjectIndexableFilesFilter filesSet = projectIndexableFiles(project);
+    IdFilter filesSet = projectIndexableFiles(project);
     IntSet set = null;
 
     if (filter instanceof GlobalSearchScope.FilesScope) {
@@ -468,7 +482,7 @@ public abstract class FileBasedIndexEx extends FileBasedIndex {
                                                         @NotNull final Collection<? extends K> dataKeys,
                                                         @NotNull final GlobalSearchScope filter,
                                                         @Nullable final Condition<? super V> valueChecker,
-                                                        @Nullable final ProjectIndexableFilesFilter projectFilesFilter,
+                                                        @Nullable final IdFilter projectFilesFilter,
                                                         @Nullable IntSet restrictedIds) {
     IntPredicate accessibleFileFilter = getAccessibleFileIdFilter(filter.getProject());
     ValueContainer.IntPredicate idChecker = projectFilesFilter == null ? accessibleFileFilter::test : id ->
@@ -478,7 +492,13 @@ public abstract class FileBasedIndexEx extends FileBasedIndex {
       return true;
     };
     ThrowableConvertor<UpdatableIndex<K, V, FileContent>, IntSet, StorageException> convertor = index -> {
-      return InvertedIndexUtil.collectInputIdsContainingAllKeys(index, dataKeys, keyChecker, valueChecker, idChecker);
+      IndexDebugProperties.DEBUG_INDEX_ID.set(indexId);
+      try {
+        return InvertedIndexUtil.collectInputIdsContainingAllKeys(index, dataKeys, keyChecker, valueChecker, idChecker);
+      }
+      finally {
+        IndexDebugProperties.DEBUG_INDEX_ID.remove();
+      }
     };
 
     return processExceptions(indexId, null, filter, convertor);

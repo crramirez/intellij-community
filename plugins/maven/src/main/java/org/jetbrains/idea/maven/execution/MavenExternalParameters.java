@@ -64,17 +64,6 @@ public final class MavenExternalParameters {
 
   @NonNls public static final String MAVEN_OPTS = "MAVEN_OPTS";
 
-  /**
-   * @deprecated use other overloads
-   */
-  @Deprecated
-  public static JavaParameters createJavaParameters(@Nullable final Project project,
-                                                    @NotNull final MavenRunnerParameters parameters,
-                                                    @Nullable MavenGeneralSettings coreSettings,
-                                                    @Nullable MavenRunnerSettings runnerSettings) throws ExecutionException {
-    return createJavaParameters(project, parameters, coreSettings, runnerSettings, null);
-  }
-
   public static JavaParameters createJavaParameters(@Nullable final Project project,
                                                     @NotNull final MavenRunnerParameters parameters) throws ExecutionException {
     return createJavaParameters(project, parameters, null, null, null);
@@ -99,7 +88,7 @@ public final class MavenExternalParameters {
     ApplicationManager.getApplication().assertReadAccessAllowed();
 
     if (coreSettings == null) {
-      coreSettings = project == null ? new MavenGeneralSettings() : MavenProjectsManager.getInstance(project).getGeneralSettings();
+      coreSettings = project == null ? new MavenGeneralSettings(project) : MavenProjectsManager.getInstance(project).getGeneralSettings();
     }
     if (runnerSettings == null) {
       runnerSettings = project == null ? new MavenRunnerSettings() : MavenRunner.getInstance(project).getState();

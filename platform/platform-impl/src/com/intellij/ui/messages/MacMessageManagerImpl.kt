@@ -3,8 +3,10 @@
 
 package com.intellij.ui.messages
 
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.ui.DialogWrapper.DoNotAskOption
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.popup.StackingPopupDispatcher
@@ -17,11 +19,16 @@ import com.intellij.ui.mac.MacMessages
 import com.intellij.ui.mac.foundation.Foundation
 import com.intellij.ui.mac.foundation.ID
 import com.intellij.ui.mac.foundation.MacUtil
+import com.intellij.util.ReflectionUtil
 import com.intellij.util.ui.UIUtil
 import com.sun.jna.Callback
-import java.awt.SecondaryLoop
-import java.awt.Toolkit
-import java.awt.Window
+import java.awt.*
+import java.awt.event.WindowEvent
+import java.lang.reflect.Proxy
+import javax.swing.JDialog
+import javax.swing.SwingUtilities
+
+private val LOG = Logger.getInstance(MacMessages::class.java)
 
 internal class MacMessageManagerProviderImpl : MacMessages.MacMessageManagerProvider {
   override fun getMessageManager(): MacMessages {
@@ -52,9 +59,44 @@ private class MessageInfo(val title: String,
                           val defaultOptionIndex: Int,
                           val doNotAskDialogOption: DoNotAskOption?) {
   val message = MacMessageHelper.stripHtmlMessage(message)
-  val window = window ?: JBMacMessages.getForemostWindow()
-  val popupMode = StackingPopupDispatcher.getInstance().isPopupFocused
-  val nativeWindow: ID = if (popupMode) ID.NIL else MacUtil.findWindowFromJavaWindow(this.window)
+
+  val window: Window
+  val visibleWindow: Window
+  val nativeWindow: ID
+  var alertWindow: ID? = null
+
+  var mainHandler = {}
+  var disposer = {}
+
+  lateinit var dialog: MyDialog
+  var result: Int? = null
+  var suppress = false
+
+  init {
+    var popupWindow: Window? = null
+    val popup = StackingPopupDispatcher.getInstance().focusedPopup
+    if (popup != null) {
+      popupWindow = SwingUtilities.getWindowAncestor(popup.content)
+    }
+    if (popupWindow == null) {
+      this.window = window ?: JBMacMessages.getForemostWindow()
+    }
+    else {
+      this.window = popupWindow
+    }
+    this.visibleWindow = getVisibleWindow(this.window)
+    this.nativeWindow = MacUtil.getWindowFromJavaWindow(this.visibleWindow)
+  }
+}
+
+private fun getVisibleWindow(window: Window): Window {
+  if (!window.isVisible) {
+    val parent = window.parent
+    if (parent is Window) {
+      return getVisibleWindow(parent)
+    }
+  }
+  return window
 }
 
 class MacMessageHelper {
@@ -83,10 +125,8 @@ class MacMessageHelper {
 
 @Service
 private class NativeMacMessageManager : MacMessages() {
-  private var myInfo: MessageInfo? = null
-  private var myLoop: SecondaryLoop? = null
-  private var myResult: Int? = null
-  private var mySuppress: Boolean = false
+  private val myInfos = ArrayList<MessageInfo?>()
+  private val myLock = Object()
 
   private fun getJBMessages() = service<JBMacMessages>()
 
@@ -161,53 +201,101 @@ private class NativeMacMessageManager : MacMessages() {
                                 defaultOptionIndex: Int,
                                 doNotAskDialogOption: DoNotAskOption?,
                                 fallback: () -> Int): Int {
+    ApplicationManager.getApplication().assertIsDispatchThread()
     val info = MessageInfo(title, message, buttons, errorStyle, window, defaultOptionIndex, doNotAskDialogOption)
+    val index = addInfoWithId(info)
 
-    assert(info.window.isVisible)
-    assert(myInfo == null)
+    info.mainHandler = {
+      Foundation.invoke(Foundation.invoke(info.nativeWindow, "delegate"), "activateWindowMenuBar")
+      info.dialog.orderAboveSiblings()
 
-    myInfo = info
-    myResult = null
-    myLoop = Toolkit.getDefaultToolkit().systemEventQueue.createSecondaryLoop()
+      info.mainHandler = {
+        info.dialog.orderAboveSiblings()
+      }
+    }
+
+    info.dialog = MyDialog(info.window) {
+      val delegate = Foundation.invoke(Foundation.invoke(Foundation.getObjcClass("NSJavaAlertDelegate"), "alloc"), "init")
+      Foundation.invoke(delegate, "performSelectorOnMainThread:withObject:waitUntilDone:", Foundation.createSelector("showAlert:"),
+                        Foundation.invoke("NSNumber", "numberWithInt:", index), false)
+      info.disposer = {
+        Foundation.cfRelease(delegate)
+        Foundation.executeOnMainThread(false, false) {
+          Foundation.invoke(Foundation.invoke(info.nativeWindow, "delegate"), "activateWindowMenuBar")
+        }
+      }
+    }
 
     try {
       IdeFocusManager.getGlobalInstance().setTypeaheadEnabled(false)
       StackingPopupDispatcher.getInstance().hidePersistentPopups()
-
-      val delegate = Foundation.invoke(Foundation.invoke(Foundation.getObjcClass("NSJavaAlertDelegate"), "alloc"), "init")
-      Foundation.invoke(delegate, "performSelectorOnMainThread:withObject:waitUntilDone:", Foundation.createSelector("showAlert:"), ID.NIL,
-                        false)
-      myLoop!!.enter()
-      Foundation.cfRelease(delegate)
+      info.dialog.show()
     }
     finally {
+      info.disposer()
       StackingPopupDispatcher.getInstance().restorePersistentPopups()
       IdeFocusManager.getGlobalInstance().setTypeaheadEnabled(true)
-      myInfo = null
-      myLoop = null
+
+      synchronized(myLock) {
+        myInfos[index] = null
+      }
     }
 
-    if (myResult != null) {
-      val result = myResult!! - 1000
+    if (info.result != null) {
+      val result = info.result!! - 1000
 
       if (doNotAskDialogOption != null && doNotAskDialogOption.canBeHidden()) {
-        if (result != Messages.CANCEL || doNotAskDialogOption.shouldSaveOptionsOnCancel()) {
-          doNotAskDialogOption.setToBeShown(!mySuppress, result)
+        if (result == Messages.OK || doNotAskDialogOption.shouldSaveOptionsOnCancel()) {
+          doNotAskDialogOption.setToBeShown(!info.suppress, result)
         }
       }
 
       return result
     }
 
+    LOG.error("=== MacAlert: no return value from native ===")
     return fallback()
+  }
+
+  private fun addInfoWithId(newInfo: MessageInfo): Int {
+    synchronized(myLock) {
+      for ((index, info) in myInfos.withIndex()) {
+        if (info == null) {
+          myInfos[index] = newInfo
+          return index
+        }
+      }
+      myInfos.add(newInfo)
+      return myInfos.size - 1
+    }
+  }
+
+  private fun getInfo(index: Int): MessageInfo {
+    synchronized(myLock) {
+      return myInfos[index]!!
+    }
+  }
+
+  private fun ourParentIsTopLevelWindowWithoutChildren(info: MessageInfo): Boolean {
+    val window = info.visibleWindow
+    return window.parent == null && window.ownedWindows.all { it == info.dialog || !it.isVisible }
   }
 
   private val SHOW_ALERT = object : Callback {
     @Suppress("UNUSED_PARAMETER", "unused")
     fun callback(self: ID, selector: String, params: ID) {
-      val info = myInfo!!
-      val window = if (info.popupMode) null else getActualWindow(info.nativeWindow)
+      val index = Foundation.invoke(params, "intValue").toInt()
+      val info = getInfo(index)
+      val ownerWindow = getActualWindow(info.nativeWindow)
+      val runModal = ownerWindow == null || !ourParentIsTopLevelWindowWithoutChildren(info)  /* prevent z-order issues with other children of our parent */
+
       val alert = Foundation.invoke(Foundation.invoke("NSAlert", "alloc"), "init")
+      val alertWindow = Foundation.invoke(alert, "window")
+      info.alertWindow = alertWindow
+
+      if (!runModal) {
+        info.dialog.setHandler(alertWindow.toLong())
+      }
 
       Foundation.invoke(alert, "setMessageText:", Foundation.nsString(info.title))
       Foundation.invoke(alert, "setInformativeText:", Foundation.nsString(info.message))
@@ -244,31 +332,44 @@ private class NativeMacMessageManager : MacMessages() {
 
       if (info.defaultOptionIndex in info.buttons.indices) {
         val button = Foundation.invoke(Foundation.invoke(alert, "buttons"), "objectAtIndex:", info.defaultOptionIndex)
-        Foundation.invoke(Foundation.invoke(alert, "window"), "setDefaultButtonCell:", Foundation.invoke(button, "cell"))
+        Foundation.invoke(alertWindow, "setDefaultButtonCell:", Foundation.invoke(button, "cell"))
       }
 
-      if (window == null) {
-        setResult(alert, Foundation.invoke(alert, "runModal"))
+      if (runModal) {
+        setResult(alert, Foundation.invoke(alert, "runModal"), index)
       }
       else {
-        Foundation.invoke(alert, "beginSheetModalForWindow:modalDelegate:didEndSelector:contextInfo:", window, self,
-                          Foundation.createSelector("alertDidEnd:returnCode:contextInfo:"), ID.NIL)
+        Foundation.invoke(alert, "beginSheetModalForWindow:modalDelegate:didEndSelector:contextInfo:", ownerWindow, self,
+                          Foundation.createSelector("alertDidEnd:returnCode:contextInfo:"), params)
       }
-      Foundation.cfRelease(alert)
     }
   }
 
   private val ALERT_DID_END = object : Callback {
     @Suppress("UNUSED_PARAMETER", "unused")
     fun callback(self: ID, selector: String, alert: ID, returnCode: ID, contextInfo: ID) {
-      setResult(alert, returnCode)
+      setResult(alert, returnCode, Foundation.invoke(contextInfo, "intValue").toInt())
     }
   }
 
-  private fun setResult(alert: ID, returnCode: ID) {
-    myResult = returnCode.toInt()
-    mySuppress = Foundation.invoke(Foundation.invoke(alert, "suppressionButton"), "state").toInt() == 1
-    myLoop!!.exit()
+  private fun setResult(alert: ID, returnCode: ID, index: Int) {
+    val info = getInfo(index)
+    info.result = returnCode.toInt()
+    info.suppress = Foundation.invoke(Foundation.invoke(alert, "suppressionButton"), "state").toInt() == 1
+    info.dialog.close()
+    Foundation.cfRelease(alert)
+  }
+
+  private val ALERT_CHANGE_JUST_MAIN = object : Callback {
+    @Suppress("UNUSED_PARAMETER", "unused")
+    fun callback(self: ID, selector: String) {
+      val info = synchronized(myLock) {
+        myInfos.find {
+          it != null && self == it.alertWindow
+        }
+      }
+      info?.mainHandler?.invoke()
+    }
   }
 
   init {
@@ -280,16 +381,17 @@ private class NativeMacMessageManager : MacMessages() {
       throw RuntimeException("Unable to add `alertDidEnd:returnCode:contextInfo:` method to Objective-C NSJavaAlertDelegate class")
     }
     Foundation.registerObjcClassPair(delegateClass)
+
+    if (SystemInfo.isMacOSBigSur && !Foundation.addMethod(Foundation.getObjcClass("_NSAlertPanel"),
+                                                          Foundation.createSelector("_changeJustMain"), ALERT_CHANGE_JUST_MAIN, "v")) {
+      throw RuntimeException("Unable to add `_changeJustMain` method to Objective-C _NSAlertPanel class")
+    }
   }
 }
 
 private fun getActualWindow(window: ID): ID? {
   if (!Foundation.invoke(window, "isVisible").booleanValue() || ID.NIL.equals(Foundation.invoke(window, "screen"))) {
-    val parent = Foundation.invoke(window, "parent")
-    if (ID.NIL.equals(parent)) {
-      return null
-    }
-    return getActualWindow(parent)
+    return null
   }
   return window
 }
@@ -299,5 +401,104 @@ private fun enableEscapeToCloseTheMessage(alert: ID) {
   if (buttonCount > 1) {
     val button = Foundation.invoke(Foundation.invoke(alert, "buttons"), "objectAtIndex:", buttonCount - 1)
     Foundation.invoke(button, "setKeyEquivalent:", Foundation.nsString("\u001b"))
+  }
+}
+
+private class MyDialog(parent: Window, private val runnable: () -> Unit) : JDialog(parent, ModalityType.APPLICATION_MODAL) {
+  private var myPlatformWindow: Any? = null
+
+  init {
+    defaultCloseOperation = DISPOSE_ON_CLOSE
+  }
+
+  override fun addNotify() {
+    try {
+      val toolkit = Toolkit.getDefaultToolkit()
+      val toolkitClass = Class.forName("sun.lwawt.LWToolkit")
+      val pc = ReflectionUtil.getDeclaredMethod(toolkitClass, "createPlatformComponent")!!.invoke(toolkit)
+      val pw = Class.forName("sun.lwawt.macosx.CPlatformLWWindow").getDeclaredConstructor().newInstance()
+      val pwClass = Class.forName("sun.lwawt.PlatformWindow")
+      val pwExt = Proxy.newProxyInstance(pwClass.classLoader, arrayOf(pwClass)) { _, method, args ->
+        if ("setBounds" == method.name) {
+          null
+        }
+        else if (args == null) {
+          method.invoke(pw)
+        }
+        else method.invoke(pw, *args)
+      }
+
+      val enumClass = Class.forName("sun.lwawt.LWWindowPeer\$PeerType")
+      val m = ReflectionUtil.getDeclaredMethod(toolkitClass, "createDelegatedPeer", Window::class.java,
+                                               Class.forName("sun.lwawt.PlatformComponent"),
+                                               Class.forName("sun.lwawt.PlatformWindow"), enumClass)
+      val peer = m!!.invoke(toolkit, this, pc, pwExt, enumClass.enumConstants[2])
+
+      ReflectionUtil.getDeclaredField(Component::class.java, "peer")!!.set(this, peer)
+
+      ReflectionUtil.getDeclaredField(Class.forName("sun.lwawt.LWWindowPeer"), "platformWindow")!!.set(peer, pw)
+      myPlatformWindow = pw
+
+      super.addNotify()
+      runnable()
+    }
+    catch (e: Throwable) {
+      LOG.error(e)
+    }
+  }
+
+  override fun hide() {
+    var blockedWindows: List<Window>? = null
+    try {
+      blockedWindows = ArrayList(ReflectionUtil.getDeclaredField(Dialog::class.java, "blockedWindows")!!.get(this) as List<Window>)
+    }
+    catch (e: Throwable) {
+      LOG.error(e)
+    }
+    super.hide()
+    if (blockedWindows != null) {
+      val owner = getOwner(this)
+      for (window in blockedWindows) {
+        if (owner === getOwner(window)) {
+          window.toFront()
+        }
+      }
+    }
+  }
+
+  private fun getOwner(window: Window): Window {
+    return window.owner?.let { getOwner(it) } ?: window
+  }
+
+  fun setHandler(handler: Long) {
+    try {
+      ReflectionUtil.getDeclaredMethod(Class.forName("sun.lwawt.macosx.CFRetainedResource"), "setPtr",
+                                       Long::class.javaPrimitiveType)!!.invoke(myPlatformWindow, handler)
+      ReflectionUtil.getDeclaredField(myPlatformWindow!!.javaClass.getSuperclass(), "visible")!!.setBoolean(myPlatformWindow, handler != 0L)
+    }
+    catch (e: Throwable) {
+      LOG.error(e)
+    }
+  }
+
+  fun orderAboveSiblings() {
+    try {
+      ReflectionUtil.getDeclaredMethod(myPlatformWindow!!.javaClass.superclass, "windowDidBecomeMain")!!.invoke(myPlatformWindow)
+    }
+    catch (e: Throwable) {
+      LOG.error(e)
+    }
+  }
+
+  fun close() {
+    setHandler(0)
+
+    try {
+      ReflectionUtil.getDeclaredMethod(Class.forName("sun.lwawt.LWToolkit"), "postEvent",
+                                       AWTEvent::class.java)!!.invoke(null, WindowEvent(this, WindowEvent.WINDOW_CLOSING))
+    }
+    catch (e: Throwable) {
+      LOG.error(e)
+    }
   }
 }

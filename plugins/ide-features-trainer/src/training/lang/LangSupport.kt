@@ -15,8 +15,8 @@ import java.nio.file.Path
 interface LangSupport {
   /** Is should be a language ID */
   val primaryLanguage: String
-  val defaultProductName: String
-    get() = ""
+  val defaultProductName: String?
+    get() = null
   val defaultProjectName: String
   val filename: String
     get() = "Learning"
@@ -25,7 +25,7 @@ interface LangSupport {
 
   /** Relative path inside plugin resources */
   val projectResourcePath: String
-    get() = "/learnProjects/${primaryLanguage.toLowerCase()}/$defaultProjectName"
+    get() = "learnProjects/${primaryLanguage.toLowerCase()}/$defaultProjectName"
 
   /** Language can specify default sandbox-like file to be used for lessons with modifications but also with project support */
   val projectSandboxRelativePath: String?

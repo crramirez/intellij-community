@@ -165,7 +165,6 @@
     <extensionPoint qualifiedName="com.intellij.compiler.task" area="IDEA_PROJECT" beanClass="com.intellij.compiler.CompileTaskBean" dynamic="true">
       <with attribute="implementation" implements="com.intellij.openapi.compiler.CompileTask"/>
     </extensionPoint>
-    <extensionPoint qualifiedName="com.intellij.compilerSettingsFactory" area="IDEA_PROJECT" interface="com.intellij.compiler.CompilerSettingsFactory" dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.compileServer.plugin" beanClass="com.intellij.compiler.server.CompileServerPlugin" dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.buildProcess.parametersProvider" area="IDEA_PROJECT"
                     interface="com.intellij.compiler.server.BuildProcessParametersProvider" dynamic="true"/>
@@ -427,8 +426,8 @@
     <projectService serviceInterface="com.intellij.debugger.ui.HotSwapUI" serviceImplementation="com.intellij.debugger.ui.HotSwapUIImpl"/>
     <projectService serviceInterface="com.intellij.debugger.DebuggerManager" serviceImplementation="com.intellij.debugger.impl.DebuggerManagerImpl"/>
 
-    <statistics.counterUsagesCollector groupId="java.find.usages" version="1"/>
-    <statistics.counterUsagesCollector groupId="java.extract.method" version="1"/>
+    <statistics.counterUsagesCollector groupId="java.find.usages" version="2"/>
+    <statistics.counterUsagesCollector groupId="java.extract.method" version="2"/>
     <statistics.counterUsagesCollector implementationClass="com.intellij.refactoring.extractMethod.newImpl.inplace.InplaceExtractMethodCollector"/>
     <statistics.applicationUsagesCollector implementation="com.intellij.debugger.settings.DebuggerSettingsStatisticsCollector"/>
     <statistics.applicationUsagesCollector implementation="com.intellij.refactoring.JavaRefactoringUsageCollector"/>
@@ -480,14 +479,6 @@
                         serviceImplementation="com.intellij.openapi.roots.ui.configuration.libraries.impl.LibraryPresentationManagerImpl"/>
 
     <daemon.highlightInfoFilter implementation="com.intellij.debugger.engine.evaluation.DebuggerHighlightFilter"/>
-
-    <!-- Project Configurables -->
-    <projectService serviceImplementation="com.intellij.openapi.roots.ui.configuration.projectRoot.ModuleStructureConfigurable"/>
-    <projectService serviceImplementation="com.intellij.openapi.roots.ui.configuration.projectRoot.FacetStructureConfigurable"/>
-    <projectService serviceImplementation="com.intellij.openapi.roots.ui.configuration.artifacts.ArtifactsStructureConfigurable"/>
-    <projectService serviceImplementation="com.intellij.openapi.roots.ui.configuration.projectRoot.ProjectLibrariesConfigurable"/>
-    <projectService serviceImplementation="com.intellij.openapi.roots.ui.configuration.projectRoot.GlobalLibrariesConfigurable"/>
-    <projectService serviceImplementation="com.intellij.openapi.roots.ui.configuration.projectRoot.JdkListConfigurable"/>
 
     <!-- Compiler -->
     <projectConfigurable groupId="build" groupWeight="130" instance="com.intellij.compiler.options.CompilerConfigurable"
@@ -900,7 +891,6 @@
     <codeInsight.externalLibraryResolver implementation="com.intellij.codeInsight.daemon.impl.quickfix.JetBrainsAnnotationsExternalLibraryResolver"/>
     <codeInsight.unresolvedReferenceQuickFixProvider implementation="com.intellij.jarFinder.FindJarQuickFixProvider"/>
     <generation.toStringClassFilter implementation="org.jetbrains.generate.tostring.GenerateToStringInterfaceFilter" order="last"/>
-    <gotoDeclarationHandler implementation="com.intellij.codeInsight.navigation.actions.GotoLambdaParameterHandler"/>
     <gotoDeclarationHandler implementation="com.intellij.codeInsight.navigation.actions.GotoVarTypeHandler"/>
     <annotator language="SPI" implementationClass="com.intellij.spi.SPIAnnotator"/>
     <lang.commenter language="SPI" implementationClass="com.intellij.spi.SPICommenter"/>
@@ -1015,7 +1005,6 @@
     <psi.implicitReferenceProvider implementation="com.intellij.codeInsight.JavaImplicitReferenceProvider"/>
     <targetElementEvaluator language="JAVA" implementationClass="com.intellij.codeInsight.JavaTargetElementEvaluator"/>
     <targetElementUtilExtender implementation="com.intellij.codeInsight.JavaTargetElementEvaluator"/>
-    <indexPatternBuilder implementation="com.intellij.psi.impl.search.JspIndexPatternBuilder"/>
     <indexPatternBuilder implementation="com.intellij.psi.impl.search.JavaIndexPatternBuilder"/>
     <printOption implementation="com.intellij.codeEditor.printing.HyperlinksToClassesOption"/>
     <macro implementation="com.intellij.ide.macro.JavaDocPathMacro"/>
@@ -1501,8 +1490,9 @@
                      groupBundle="messages.InspectionsBundle" groupKey="group.names.code.style.issues"
                      bundle="messages.JavaBundle" key="inspection.message.record.can.be.converted.to.class"
                      implementationClass="com.intellij.codeInspection.RecordCanBeClassInspection"/>
-    <localInspection groupPath="Java" language="JAVA" shortName="ClassCanBeRecord" enabledByDefault="true" level="WEAK WARNING"
-                     groupBundle="messages.InspectionsBundle" groupKey="group.names.code.style.issues"
+    <localInspection groupPathKey="group.path.names.java.language.level.specific.issues.and.migration.aids" language="JAVA" 
+                     shortName="ClassCanBeRecord" enabledByDefault="true" level="WEAK WARNING"
+                     groupBundle="messages.InspectionsBundle" groupKey="group.names.language.level.specific.issues.and.migration.aids15"
                      bundle="messages.JavaBundle" key="class.can.be.record.display.name"
                      implementationClass="com.intellij.codeInspection.classCanBeRecord.ClassCanBeRecordInspection"/>
     <localInspection groupPath="Java" language="JAVA" shortName="EndlessStream"
@@ -1648,6 +1638,10 @@
                      groupKey="group.names.declaration.redundancy" groupBundle="messages.InspectionsBundle"
                      enabledByDefault="true" level="WARNING"
                      implementationClass="com.intellij.codeInspection.DefaultAnnotationParamInspection" />
+    <localInspection groupPath="Java" language="JAVA" shortName="ConvertToBasicLatin" bundle="messages.JavaBundle" key="inspection.convert.to.basic.latin"
+                     groupKey="group.names.i18n" groupBundle="messages.InspectionsBundle"
+                     enabledByDefault="true" level="INFORMATION"
+                     implementationClass="com.intellij.codeInspection.ConvertToBasicLatinInspection" />
     <localInspection groupPath="Java" language="JAVA" shortName="SillyAssignment" bundle="messages.JavaBundle" key="inspection.variable.assigned.to.itself.display.name"
                      groupKey="group.names.declaration.redundancy" groupBundle="messages.InspectionsBundle"
                      enabledByDefault="true" level="WARNING"
@@ -1689,11 +1683,10 @@
                      groupKey="group.names.code.style.issues" groupBundle="messages.InspectionsBundle"
                      enabledByDefault="true" level="INFORMATION"
                      implementationClass="com.intellij.codeInspection.intermediaryVariable.ReturnSeparatedFromComputationInspection"/>
-    <localInspection groupPath="Java" language="JAVA" shortName="RawTypeCanBeGeneric" bundle="messages.JavaBundle"
-                     key="inspection.raw.variable.type.can.be.generic.name"
-                     groupKey="group.names.code.style.issues" groupBundle="messages.InspectionsBundle"
-                     enabledByDefault="true" level="INFORMATION"
-                     implementationClass="com.intellij.codeInspection.miscGenerics.RawTypeCanBeGenericInspection"/>
+    <localInspection groupPathKey="group.path.names.java.language.level.specific.issues.and.migration.aids" language="JAVA" suppressId="rawtypes" alternativeId="RawUseOfParameterized" shortName="RawUseOfParameterizedType" bundle="messages.InspectionGadgetsBundle"
+                     key="raw.use.of.parameterized.type.display.name" groupBundle="messages.InspectionsBundle"
+                     groupKey="group.names.language.level.specific.issues.and.migration.aids5" enabledByDefault="true" level="WARNING"
+                     implementationClass="com.intellij.codeInspection.miscGenerics.RawUseOfParameterizedTypeInspection"/>
     <localInspection groupPath="Java" language="JAVA" shortName="RedundantArrayCreation" bundle="messages.JavaBundle"
                      key="inspection.redundant.array.creation.display.name"
                      groupKey="group.names.verbose.or.redundant.code.constructs" groupBundle="messages.InspectionsBundle"
@@ -1805,6 +1798,11 @@
                      groupKey="group.names.compiler.issues" groupBundle="messages.InspectionsBundle"
                      enabledByDefault="true" level="WARNING"
                      implementationClass="com.intellij.codeInspection.valuebased.SynchronizeOnValueBasedClassInspection"/>
+    <localInspection groupPath="Java" language="JAVA" suppressId="preview" shortName="PreviewFeature"
+                     key="inspection.preview.feature" bundle="messages.JavaBundle"
+                     groupKey="group.names.compiler.issues" groupBundle="messages.InspectionsBundle"
+                     enabledByDefault="true" level="WARNING"
+                     implementationClass="com.intellij.codeInspection.preview.PreviewFeatureInspection"/>
 
     <globalInspection groupPath="Java" language="JAVA" shortName="EmptyMethod" groupKey="group.names.declaration.redundancy" enabledByDefault="true" groupBundle="messages.InspectionsBundle"
                       level="WARNING" implementationClass="com.intellij.codeInspection.emptyMethod.EmptyMethodInspection"
@@ -1888,10 +1886,6 @@
     <intentionAction>
       <className>com.intellij.codeInsight.intention.impl.AddOnDemandStaticImportAction</className>
       <category>Java/Imports</category>
-    </intentionAction>
-    <intentionAction>
-      <className>com.intellij.codeInsight.intention.impl.ConvertToBasicLatinAction</className>
-      <category>Java/I18N</category>
     </intentionAction>
     <intentionAction>
       <className>com.intellij.codeInsight.intention.impl.ConcatenationToMessageFormatAction</className>
@@ -2126,6 +2120,7 @@
     <notificationGroup id="Quarantine Cleaner" displayType="BALLOON" bundle="messages.JavaUiBundle" key="quarantine.cleaner"/>
     <notificationGroup id="Build Script Found" displayType="STICKY_BALLOON"/>
     <notificationGroup id="Java Preview Features" displayType="BALLOON"/>
+    <notificationGroup id="Remove redundant exports/opens" displayType="BALLOON"/>
 
     <compiler.task implementation="com.intellij.execution.scratch.JavaScratchCompilationSupport"/>
     <registryKey key="load.maven.dependencies.timeout" defaultValue="120" description="How long (in minutes) idea will wait for results of synchronized maven dependencies resolution"/>

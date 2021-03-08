@@ -5,10 +5,11 @@ import com.intellij.completion.ml.experiment.ExperimentInfo;
 import com.intellij.completion.ml.experiment.ExperimentStatus;
 import com.intellij.completion.ml.ranker.ExperimentModelProvider;
 import com.intellij.completion.ml.sorting.RankingSupport;
+import com.intellij.internal.ml.completion.DecoratingItemsPolicy;
 import com.intellij.internal.ml.completion.RankingModelProvider;
 import com.intellij.lang.Language;
-import com.intellij.openapi.application.ApplicationInfo;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ex.ApplicationInfoEx;
 import com.intellij.openapi.components.*;
 import com.intellij.openapi.diagnostic.Logger;
 import org.jetbrains.annotations.ApiStatus;
@@ -42,6 +43,10 @@ public final class CompletionMLRankingSettings implements PersistentStateCompone
     return myState.showDiff;
   }
 
+  public boolean isDecorateRelevantEnabled() {
+    return myState.decorateRelevant;
+  }
+
   public void setRankingEnabled(boolean value) {
     if (value == isRankingEnabled()) return;
     myState.rankingEnabled = value;
@@ -71,6 +76,10 @@ public final class CompletionMLRankingSettings implements PersistentStateCompone
     MLCompletionSettingsCollector.decorationSettingChanged(isEnabled);
   }
 
+  public void setDecorateRelevantEnabled(boolean isEnabled) {
+    myState.decorateRelevant = isEnabled;
+  }
+
   @ApiStatus.Internal
   public void updateShowDiffInExperiment(boolean isEnabled) {
     myState.showDiff = isEnabled;
@@ -97,16 +106,15 @@ public final class CompletionMLRankingSettings implements PersistentStateCompone
   }
 
   private static void disableExperiment() {
-    ExperimentStatus.Companion.getInstance().disable();
+    ExperimentStatus status = ExperimentStatus.Companion.getInstance();
+    if (!status.isDisabled()) {
+      LOG.info("Leave A/B ML completion experiment group");
+    }
+    status.disable();
   }
 
   private static boolean isEnabledByDefault(@NotNull String rankerId) {
     return ExperimentModelProvider.enabledByDefault().contains(rankerId);
-  }
-
-  private static boolean isShowDiffEnabledByDefault() {
-    String productCode = ApplicationInfo.getInstance().getBuild().getProductCode();
-    return productCode == "PY" || productCode == "PC";
   }
 
   private void triggerSettingsChanged(boolean enabled) {
@@ -124,19 +132,27 @@ public final class CompletionMLRankingSettings implements PersistentStateCompone
 
   public static final class State {
     public boolean rankingEnabled;
-    public boolean showDiff = isShowDiffEnabledByDefault();
+    public boolean showDiff;
+    public boolean decorateRelevant;
     public final Map<String, Boolean> language2state = new HashMap<>();
 
     public State() {
       ExperimentStatus experimentStatus = ExperimentStatus.Companion.getInstance();
+      boolean isEAP = ApplicationInfoEx.getInstanceEx().isEAP();
       for (Language language : Language.getRegisteredLanguages()) {
         RankingModelProvider ranker = RankingSupport.INSTANCE.findProviderSafe(language);
         if (ranker != null) {
           ExperimentInfo experimentInfo = experimentStatus.forLanguage(language);
           if (!experimentStatus.isDisabled() && experimentInfo.getInExperiment()) {
-            language2state.put(ranker.getId(), experimentInfo.getShouldRank());
+            boolean useMLRanking = experimentInfo.getShouldRank();
+            language2state.put(ranker.getId(), useMLRanking);
+            if (useMLRanking)
+              LOG.info("ML Completion enabled, experiment group=" + experimentInfo.getVersion() + " for: " + language.getDisplayName());
           } else {
             language2state.put(ranker.getId(), ranker.isEnabledByDefault());
+            if (isEAP) {
+              decorateRelevant |= ranker.getDecoratingPolicy() != DecoratingItemsPolicy.Companion.getDISABLED();
+            }
           }
         }
       }

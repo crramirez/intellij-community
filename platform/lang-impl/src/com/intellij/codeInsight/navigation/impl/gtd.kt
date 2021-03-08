@@ -8,7 +8,7 @@ import com.intellij.model.psi.impl.TargetData
 import com.intellij.model.psi.impl.declaredReferencedData
 import com.intellij.navigation.NavigationTarget
 import com.intellij.navigation.SymbolNavigationService
-import com.intellij.navigation.TargetPopupPresentation
+import com.intellij.navigation.TargetPresentation
 import com.intellij.openapi.project.Project
 import com.intellij.pom.Navigatable
 import com.intellij.psi.PsiFile
@@ -40,9 +40,14 @@ sealed class GTDActionResult {
   /**
    * Single [Navigatable].
    *
-   * Might be obtained from direct navigation, in this case requiring [TargetPopupPresentation] doesn't make sense.
+   * Might be obtained from direct navigation, in this case requiring [TargetPresentation] doesn't make sense.
    */
-  class SingleTarget(val navigatable: Navigatable, val navigationProvider: Any?) : GTDActionResult()
+  class SingleTarget(val navigatable: () -> Navigatable, val navigationProvider: Any?) : GTDActionResult() {
+    constructor(
+      navigatable: Navigatable,
+      navigationProvider: Any?
+    ) : this({ navigatable }, navigationProvider)
+  }
 
   class MultipleTargets(val targets: List<GTDTarget>) : GTDActionResult() {
     init {
@@ -52,7 +57,13 @@ sealed class GTDActionResult {
 }
 
 @ApiStatus.Internal
-data class GTDTarget(val navigatable: Navigatable, val presentation: TargetPopupPresentation, val navigationProvider: Any?)
+data class GTDTarget(val navigatable: () -> Navigatable, val presentation: TargetPresentation, val navigationProvider: Any?) {
+  constructor(
+    navigatable: Navigatable,
+    presentation: TargetPresentation,
+    navigationProvider: Any?
+  ) : this({ navigatable }, presentation, navigationProvider)
+}
 
 private fun gotoDeclarationInner(file: PsiFile, offset: Int): GTDActionData? {
   return fromDirectNavigation(file, offset)
@@ -81,25 +92,24 @@ private class TargetGTDActionData(private val project: Project, private val targ
       extractSingleTargetResult(symbol, navigationProvider)?.let { result -> return result }
     }
 
-    data class GTDSingleTarget(val navigatable: Navigatable, val target: NavigationTarget, val navigationProvider: Any?)
+    data class GTDSingleTarget(val navigationTarget: NavigationTarget, val navigationProvider: Any?)
 
     val result = SmartList<GTDSingleTarget>()
     for ((symbol, navigationProvider) in targetData.targets) {
       for (navigationTarget in SymbolNavigationService.getInstance().getNavigationTargets(project, symbol)) {
-        val navigatable = navigationTarget.navigatable ?: continue
-        result += GTDSingleTarget(navigatable, navigationTarget, navigationProvider)
+        result += GTDSingleTarget(navigationTarget, navigationProvider)
       }
     }
     return when (result.size) {
       0 -> null
       1 -> {
         // don't compute presentation for single target
-        val (navigatable, _, navigationProvider) = result.single()
-        GTDActionResult.SingleTarget(navigatable, navigationProvider)
+        val (navigationTarget, navigationProvider) = result.single()
+        GTDActionResult.SingleTarget(navigationTarget::getNavigatable, navigationProvider)
       }
       else -> {
-        val targets = result.map { (navigatable, navigationTarget, navigationProvider) ->
-          GTDTarget(navigatable, navigationTarget.targetPresentation, navigationProvider)
+        val targets = result.map { (navigationTarget, navigationProvider) ->
+          GTDTarget(navigationTarget::getNavigatable, navigationTarget.targetPresentation, navigationProvider)
         }
         GTDActionResult.MultipleTargets(targets)
       }
@@ -108,7 +118,7 @@ private class TargetGTDActionData(private val project: Project, private val targ
 
   private fun extractSingleTargetResult(symbol: Symbol, navigationProvider: Any?): GTDActionResult.SingleTarget? {
     val el = PsiSymbolService.getInstance().extractElementFromSymbol(symbol) ?: return null
-    val nav = gtdTargetNavigatable(el) ?: return null
+    val nav = gtdTargetNavigatable(el)
     return if (nav == el) null else GTDActionResult.SingleTarget(nav, navigationProvider)
   }
 }

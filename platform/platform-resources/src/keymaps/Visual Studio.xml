@@ -277,7 +277,9 @@
     <keyboard-shortcut first-keystroke="control E" second-keystroke="U"/>
     <keyboard-shortcut first-keystroke="control E" second-keystroke="control U"/>
   </action>
-  <action id="Vcs.ShowMessageHistory"/>
+  <action id="Vcs.ShowMessageHistory">
+    <keyboard-shortcut first-keystroke="control H"/>
+  </action>
   <action id="GotoNextError">
     <keyboard-shortcut first-keystroke="alt PAGE_DOWN"/>
   </action>
@@ -444,6 +446,7 @@
   <action id="ToggleFullScreen">
     <keyboard-shortcut first-keystroke="alt shift ENTER"/>
   </action>
+  <action id="SplitChooser"/>
   <action id="SurroundWith"/>
   <action id="MethodHierarchy"/>
   <action id="NextEditorTab"/>

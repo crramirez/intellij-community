@@ -7,6 +7,7 @@ import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vcs.AbstractVcs;
 import com.intellij.openapi.vcs.ProjectLevelVcsManager;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Collection;
@@ -14,6 +15,10 @@ import java.util.Collection;
 import static com.intellij.util.containers.ContainerUtil.newHashSet;
 import static java.util.Collections.emptySet;
 
+/**
+ * @deprecated Use {@link DumbAwareAction} instead.
+ */
+@Deprecated
 public abstract class AbstractVcsAction extends DumbAwareAction {
 
   @SuppressWarnings("unused") // Required for compatibility with external plugins.
@@ -43,6 +48,7 @@ public abstract class AbstractVcsAction extends DumbAwareAction {
    */
   @SuppressWarnings("unused") // Required for compatibility with external plugins.
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   protected boolean forceSyncUpdate(@NotNull AnActionEvent e) {
     return true;
   }
@@ -52,6 +58,7 @@ public abstract class AbstractVcsAction extends DumbAwareAction {
    * @deprecated Use {@link AbstractVcsAction#update(VcsContext, Presentation)}.
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   protected void performUpdate(@NotNull Presentation presentation, @NotNull VcsContext vcsContext) {
     update(vcsContext, presentation);
   }

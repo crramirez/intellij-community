@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.options;
 
 import com.intellij.ide.ui.search.BooleanOptionDescription;
@@ -12,13 +12,9 @@ import com.intellij.ui.IdeBorderFactory;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.JBIterable;
 import com.intellij.util.ui.JBUI;
-import com.intellij.util.ui.UI;
 import com.intellij.util.ui.components.BorderLayoutPanel;
 import kotlin.reflect.KMutableProperty0;
-import org.jetbrains.annotations.Nls;
-import org.jetbrains.annotations.NonNls;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.*;
 
 import javax.swing.*;
 import java.awt.*;
@@ -245,6 +241,7 @@ public abstract class BeanConfigurable<T> implements UnnamedConfigurable, Config
    * @deprecated use {@link #checkBox(String, Getter, Setter)} instead
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   protected void checkBox(@NonNls String fieldName, @NlsContexts.Checkbox String title) {
     myFields.add(new CheckboxField(fieldName, title));
   }
@@ -254,7 +251,7 @@ public abstract class BeanConfigurable<T> implements UnnamedConfigurable, Config
    * Initial checkbox value is obtained from {@code getter}.
    * After the apply, the value from the check box is written back to model via {@code setter}.
    */
-  protected void checkBox(@NlsContexts.Checkbox @NotNull String title, @NotNull Getter<Boolean> getter, @NotNull Setter<Boolean> setter) {
+  protected void checkBox(@NlsContexts.Checkbox @NotNull String title, @NotNull Getter<Boolean> getter, @NotNull Setter<? super Boolean> setter) {
     CheckboxField field = new CheckboxField(new BeanMethodAccessor<>(getter, setter), title);
     myFields.add(field);
   }
@@ -271,7 +268,7 @@ public abstract class BeanConfigurable<T> implements UnnamedConfigurable, Config
    * E.g. text from the edit box is queried and saved back to model bean.
    */
   protected <V> void component(@NotNull JComponent component, @NotNull Getter<? extends V> beanGetter, @NotNull Setter<? super V> beanSetter, @NotNull Getter<? extends V> componentGetter, @NotNull Setter<? super V> componentSetter) {
-    BeanField<JComponent> field = new BeanField<JComponent>(new BeanMethodAccessor<V>(beanGetter, beanSetter)) {
+    BeanField<JComponent> field = new BeanField<>(new BeanMethodAccessor<V>(beanGetter, beanSetter)) {
       @NotNull
       @Override
       JComponent createComponent() {
@@ -316,7 +313,7 @@ public abstract class BeanConfigurable<T> implements UnnamedConfigurable, Config
     for (BeanField field: myFields) {
       panel.add(field.getComponent());
     }
-    BorderLayoutPanel result = UI.Panels.simplePanel().addToTop(panel);
+    BorderLayoutPanel result = JBUI.Panels.simplePanel().addToTop(panel);
     if (myTitle != null) {
       result.setBorder(IdeBorderFactory.createTitledBorder(myTitle));
     }

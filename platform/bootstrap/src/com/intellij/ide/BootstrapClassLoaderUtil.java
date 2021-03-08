@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ide;
 
 import com.intellij.idea.Main;
@@ -23,8 +23,6 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 public final class BootstrapClassLoaderUtil {
-  public static final @NonNls String CLASSPATH_ORDER_FILE = "classpath.txt";
-
   private static final String PROPERTY_IGNORE_CLASSPATH = "ignore.classpath";
   private static final String PROPERTY_ALLOW_BOOTSTRAP_RESOURCES = "idea.allow.bootstrap.resources";
   private static final String PROPERTY_ADDITIONAL_CLASSPATH = "idea.additional.classpath";
@@ -54,7 +52,7 @@ public final class BootstrapClassLoaderUtil {
 
     Collection<Path> classpath = new LinkedHashSet<>();
     parseClassPathString(System.getProperty("java.class.path"), classpath);
-    addIdeaLibraries(distDir, classpath);
+    addIdeaLibraries(distDir.resolve("lib"), classpath);
     parseClassPathString(System.getProperty(PROPERTY_ADDITIONAL_CLASSPATH), classpath);
 
     Path pluginDir = Path.of(PathManager.getPluginsPath());
@@ -166,12 +164,12 @@ public final class BootstrapClassLoaderUtil {
     return true;
   }
 
-  private static void addIdeaLibraries(@NotNull Path distDir, @NotNull Collection<Path> classpath) throws IOException {
-    Path classPathFile = (SystemInfoRt.isMac ? distDir.resolve("Resources") : distDir).resolve(CLASSPATH_ORDER_FILE);
+  private static void addIdeaLibraries(@NotNull Path libDir, @NotNull Collection<Path> classpath) throws IOException {
+    Path classPathFile = libDir.resolve("classpath.txt");
     try (Stream<String> stream = Files.lines(classPathFile)) {
       stream.forEach(jarName -> {
         if (!jarName.isEmpty()) {
-          classpath.add(distDir.resolve(jarName));
+          classpath.add(libDir.resolve(jarName));
         }
       });
       return;
@@ -250,7 +248,7 @@ public final class BootstrapClassLoaderUtil {
       myMinor = minor;
     }
 
-    public boolean isAtLeast(@NotNull Comparable<SimpleVersion> ver) {
+    public boolean isAtLeast(@NotNull Comparable<? super SimpleVersion> ver) {
       return ver.compareTo(this) <= 0;
     }
 

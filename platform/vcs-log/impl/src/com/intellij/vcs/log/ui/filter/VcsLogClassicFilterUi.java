@@ -1,6 +1,7 @@
 // Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.vcs.log.ui.filter;
 
+import com.intellij.ide.HelpTooltip;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.ActionGroup;
 import com.intellij.openapi.actionSystem.AnActionEvent;
@@ -205,7 +206,8 @@ public class VcsLogClassicFilterUi implements VcsLogFilterUiEx {
 
     @NotNull private final Computable<? extends JComponent> myComponentCreator;
 
-    public FilterActionComponent(@NotNull Supplier<@Nls @NlsActions.ActionText String> dynamicText, @NotNull Computable<? extends JComponent> componentCreator) {
+    public FilterActionComponent(@NotNull Supplier<@Nls @NlsActions.ActionText String> dynamicText,
+                                 @NotNull Computable<? extends JComponent> componentCreator) {
       super(dynamicText);
       myComponentCreator = componentCreator;
     }
@@ -785,10 +787,10 @@ public class VcsLogClassicFilterUi implements VcsLogFilterUiEx {
           }
         }
       });
-      String shortcutText = KeymapUtil.getFirstKeyboardShortcutText(VcsLogActionPlaces.VCS_LOG_FOCUS_TEXT_FILTER);
-      if (!shortcutText.isEmpty()) {
-        getTextEditor().setToolTipText(VcsLogBundle.message("vcs.log.filter.search.tooltip", shortcutText));
-      }
+      new HelpTooltip().setTitle(VcsLogBundle.message("vcs.log.filter.text.hash.tooltip"))
+        .setShortcut(KeymapUtil.getFirstKeyboardShortcutText(VcsLogActionPlaces.VCS_LOG_FOCUS_TEXT_FILTER))
+        .setLocation(HelpTooltip.Alignment.BOTTOM)
+        .installOn(getTextEditor());
     }
 
     protected void applyFilter() {

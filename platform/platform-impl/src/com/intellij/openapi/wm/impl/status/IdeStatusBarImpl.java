@@ -7,6 +7,7 @@ import com.intellij.notification.impl.widget.IdeNotificationArea;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.TaskInfo;
 import com.intellij.openapi.project.Project;
@@ -51,6 +52,7 @@ import java.util.*;
 import java.util.function.Consumer;
 
 public class IdeStatusBarImpl extends JComponent implements Accessible, StatusBarEx, IdeEventQueue.EventDispatcher, DataProvider {
+  private static final Logger LOG = Logger.getInstance(IdeStatusBarImpl.class);
   public static final DataKey<String> HOVERED_WIDGET_ID = DataKey.create("HOVERED_WIDGET_ID");
 
   private static final String WIDGET_ID = "STATUS_BAR_WIDGET_ID";
@@ -487,7 +489,11 @@ public class IdeStatusBarImpl extends JComponent implements Accessible, StatusBa
       return result;
     }
 
-    JComponent wrapper = StatusBarWidgetWrapper.wrap(Objects.requireNonNull(widget.getPresentation()));
+    StatusBarWidget.WidgetPresentation presentation = widget.getPresentation();
+    if (presentation == null) {
+      LOG.error("Widget " + widget + " getPresentation() method must not return null");
+    }
+    JComponent wrapper = StatusBarWidgetWrapper.wrap(Objects.requireNonNull(presentation));
     wrapper.putClientProperty(WIDGET_ID, widget.ID());
     wrapper.putClientProperty(UIUtil.CENTER_TOOLTIP_DEFAULT, Boolean.TRUE);
     return wrapper;
@@ -508,13 +514,14 @@ public class IdeStatusBarImpl extends JComponent implements Accessible, StatusBa
   }
 
   private void paintHoveredComponentBackground(Graphics g) {
-    if (myHoveredComponent != null && myHoveredComponent.isEnabled() &&
-        !(myHoveredComponent instanceof MemoryUsagePanel)) {
-      Rectangle bounds = myHoveredComponent.getBounds();
-      Point point = new RelativePoint(myHoveredComponent.getParent(), bounds.getLocation()).getPoint(this);
-      g.setColor(JBUI.CurrentTheme.StatusBar.hoverBackground());
-      g.fillRect(point.x, point.y, bounds.width, bounds.height);
-    }
+    if (myHoveredComponent == null || !myHoveredComponent.isEnabled()) return;
+    if (!UIUtil.isAncestor(this, myHoveredComponent)) return;
+    if (myHoveredComponent instanceof MemoryUsagePanel) return;
+
+    Rectangle bounds = myHoveredComponent.getBounds();
+    Point point = new RelativePoint(myHoveredComponent.getParent(), bounds.getLocation()).getPoint(this);
+    g.setColor(JBUI.CurrentTheme.StatusBar.hoverBackground());
+    g.fillRect(point.x, point.y, bounds.width, bounds.height);
   }
 
   @Override

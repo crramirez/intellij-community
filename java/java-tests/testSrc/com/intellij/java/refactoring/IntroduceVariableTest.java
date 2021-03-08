@@ -143,6 +143,9 @@ public class IntroduceVariableTest extends LightJavaCodeInsightTestCase {
   public void testPatternVariableDeclarationJava15Preview() {
     doTestWithVarType(new MockIntroduceVariableHandler("temp", true, false, false, JAVA_LANG_STRING));
   }
+  public void testPatternVariableDeclarationUpcastJava16() {
+    doTestWithVarType(new MockIntroduceVariableHandler("temp", true, false, false, JAVA_LANG_STRING));
+  }
   public void testPatternVariableDeclarationUsedInLocalJava15Preview() { doTest("temp", true, false, false, JAVA_LANG_STRING);}
   public void testPatternVariableDeclarationAfterIfJava15Preview() { doTest("temp", true, false, false, JAVA_LANG_STRING);}
   public void testNonPatternVariableDeclarationTwoBlocksJava15Preview() { doTest("temp", true, false, false, JAVA_LANG_STRING);}
@@ -163,6 +166,14 @@ public class IntroduceVariableTest extends LightJavaCodeInsightTestCase {
 
   public void testVarTypeExtractedJava10() {
     doTestWithVarType(new MockIntroduceVariableHandler("temp", true, false, false, "java.util.ArrayList<java.lang.String>"));
+  }
+  
+  public void testVarTypeArrayExtractedJava10() {
+    doTestWithVarType(new MockIntroduceVariableHandler("temp", true, false, false, "int[]"));
+  }
+
+  public void testVarTypeLambdaTypeCast() {
+    doTestWithVarType(new MockIntroduceVariableHandler("temp", true, false, false, "I"));
   }
 
   public void testTypeContainingVarJava11() {

@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package git4idea.index.ui
 
 import com.intellij.ide.dnd.DnDActionInfo
@@ -22,9 +22,10 @@ import com.intellij.openapi.vcs.changes.ui.*
 import com.intellij.openapi.vcs.impl.PlatformVcsPathPresenter
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.ClickListener
+import com.intellij.ui.ComponentUtil
 import com.intellij.ui.LayeredIcon
 import com.intellij.ui.SimpleTextAttributes
-import com.intellij.ui.components.JBScrollPane
+import com.intellij.util.EventDispatcher
 import com.intellij.util.FontUtil
 import com.intellij.util.containers.ContainerUtil
 import com.intellij.util.containers.JBIterable
@@ -44,10 +45,7 @@ import git4idea.status.GitStagingAreaHolder
 import org.jetbrains.annotations.Nls
 import org.jetbrains.annotations.NonNls
 import org.jetbrains.annotations.PropertyKey
-import java.awt.Color
-import java.awt.Graphics
-import java.awt.Point
-import java.awt.Rectangle
+import java.awt.*
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.Icon
@@ -74,6 +72,7 @@ abstract class GitStageTree(project: Project, private val settings: GitStageUiSe
   init {
     isKeepTreeState = true
     isScrollToSelection = false
+    isShowCheckboxes = true
     setCellRenderer(GitStageTreeRenderer(myProject) { isShowFlatten })
     MyMouseListener().also {
       addMouseMotionListener(it)
@@ -98,7 +97,7 @@ abstract class GitStageTree(project: Project, private val settings: GitStageUiSe
     val path = getClosestPathForLocation(point.x, point.y) ?: return null
     val node = path.lastPathComponent as? ChangesBrowserNode<*> ?: return null
     val operation = getFirstMatchingOperation(node) ?: return null
-    val componentBounds = operation.icon?.let { getComponentBounds(path, it)} ?: return null
+    val componentBounds = operation.icon?.let { getComponentBounds(path, it) } ?: return null
 
     return HoverData(node, operation, componentBounds.contains(point))
   }
@@ -116,7 +115,7 @@ abstract class GitStageTree(project: Project, private val settings: GitStageUiSe
   }
 
   private fun getComponentWidth(icon: Icon): Int {
-    val hasTransparentScrollbar = JBScrollPane.findScrollPane(this)?.verticalScrollBar?.let { it.isVisible && !it.isOpaque } == true
+    val hasTransparentScrollbar = ComponentUtil.getScrollPane(this)?.verticalScrollBar?.let { it.isVisible && !it.isOpaque } == true
     if (hasTransparentScrollbar) return icon.iconWidth + UIUtil.getScrollBarWidth()
     return icon.iconWidth
   }
@@ -199,7 +198,7 @@ abstract class GitStageTree(project: Project, private val settings: GitStageUiSe
     }
   }
 
-  private inner class MyTreeModelBuilder internal constructor(project: Project, grouping: ChangesGroupingPolicyFactory)
+  private inner class MyTreeModelBuilder(project: Project, grouping: ChangesGroupingPolicyFactory)
     : TreeModelBuilder(project, grouping) {
     private val parentNodes: MutableMap<NodeKind, MyKindNode> = mutableMapOf()
     private val untrackedFilesMap = mutableMapOf<VirtualFile, MutableCollection<GitFileStatus>>()
@@ -305,18 +304,17 @@ abstract class GitStageTree(project: Project, private val settings: GitStageUiSe
     }
   }
 
-  private open inner class MyKindNode(kind: NodeKind) : ChangesBrowserNode<NodeKind>(kind) {
-    internal val kind: NodeKind
+  protected open inner class MyKindNode(kind: NodeKind) : ChangesBrowserNode<NodeKind>(kind) {
+    val kind: NodeKind
       get() = userObject as NodeKind
 
     init {
       markAsHelperNode()
-      setAttributes(SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
     }
 
     override fun render(renderer: ChangesBrowserNodeRenderer, selected: Boolean, expanded: Boolean, hasFocus: Boolean) {
+      renderer.append(textPresentation, SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
       if (kind == NodeKind.CONFLICTED) {
-        renderer.append(textPresentation, attributes)
         renderer.append(FontUtil.spaceAndThinSpace(), SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES)
         renderer.append(VcsBundle.message("changes.nodetitle.merge.conflicts.resolve.link.label"),
                         SimpleTextAttributes.LINK_BOLD_ATTRIBUTES,
@@ -326,11 +324,8 @@ abstract class GitStageTree(project: Project, private val settings: GitStageUiSe
                           }.filter { it != null }.toList() as List<VirtualFile>
                           showMergeDialog(conflictedFiles)
                         })
-        appendCount(renderer)
       }
-      else {
-        super.render(renderer, selected, expanded, hasFocus)
-      }
+      appendCount(renderer)
     }
 
     @Nls
@@ -362,7 +357,9 @@ abstract class GitStageTree(project: Project, private val settings: GitStageUiSe
     override fun getSortWeight(): Int = sortOrder.getValue(NodeKind.UNTRACKED)
   }
 
-  private class GitStageTreeRenderer(project: Project, isShowFlatten: () -> Boolean) : ChangesBrowserNodeRenderer(project, isShowFlatten, true) {
+  private class GitStageTreeRenderer(project: Project, isShowFlatten: () -> Boolean) :
+    ChangesTreeCellRenderer(ChangesBrowserNodeRenderer(project, isShowFlatten, true)) {
+
     private var floatingIcon: FloatingIcon? = null
 
     override fun paint(g: Graphics) {
@@ -373,15 +370,16 @@ abstract class GitStageTree(project: Project, private val settings: GitStageUiSe
       }
     }
 
-    override fun customizeCellRenderer(tree: JTree,
-                                       value: Any?,
-                                       selected: Boolean,
-                                       expanded: Boolean,
-                                       leaf: Boolean,
-                                       row: Int,
-                                       hasFocus: Boolean) {
-      super.customizeCellRenderer(tree, value, selected, expanded, leaf, row, hasFocus)
+    override fun getTreeCellRendererComponent(tree: JTree,
+                                              value: Any,
+                                              selected: Boolean,
+                                              expanded: Boolean,
+                                              leaf: Boolean,
+                                              row: Int,
+                                              hasFocus: Boolean): Component {
+      val rendererComponent = super.getTreeCellRendererComponent(tree, value, selected, expanded, leaf, row, hasFocus)
       floatingIcon = prepareIcon(tree as GitStageTree, value as ChangesBrowserNode<*>, row, selected)
+      return rendererComponent
     }
 
     fun prepareIcon(tree: GitStageTree, node: ChangesBrowserNode<*>, row: Int, selected: Boolean): FloatingIcon? {
@@ -464,10 +462,10 @@ abstract class GitStageTree(project: Project, private val settings: GitStageUiSe
       return null
     }
 
-    override fun canHandleDropEvent(aEvent: DnDEvent, dropNode: ChangesBrowserNode<*>): Boolean {
+    override fun canHandleDropEvent(aEvent: DnDEvent, dropNode: ChangesBrowserNode<*>?): Boolean {
       val dragBean = aEvent.attachedObject
       if (dragBean is MyDragBean) {
-        if (dragBean.sourceComponent === this@GitStageTree && canAcceptDrop(dropNode, dragBean)) {
+        if (dropNode != null && dragBean.sourceComponent === this@GitStageTree && canAcceptDrop(dropNode, dragBean)) {
           dragBean.targetNode = dropNode
           return true
         }

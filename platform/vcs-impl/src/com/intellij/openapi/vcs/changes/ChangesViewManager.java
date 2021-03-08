@@ -81,7 +81,6 @@ import static com.intellij.openapi.vcs.changes.ui.ChangesViewContentManagerKt.is
 import static com.intellij.util.containers.ContainerUtil.set;
 import static com.intellij.util.ui.JBUI.Panels.simplePanel;
 import static java.util.Arrays.asList;
-import static java.util.Objects.requireNonNull;
 
 @State(
   name = "ChangesViewManager",
@@ -116,7 +115,7 @@ public class ChangesViewManager implements ChangesViewEx,
 
     project.getMessageBus().connect(this).subscribe(CommitModeManager.COMMIT_MODE_TOPIC, () -> updateCommitWorkflow());
     // invokeLater to avoid potential cyclic dependency with ChangesViewCommitPanel constructor
-    ApplicationManager.getApplication().invokeLater(() -> updateCommitWorkflow());
+    ApplicationManager.getApplication().invokeLater(() -> updateCommitWorkflow(), myProject.getDisposed());
   }
 
   public static class ContentPreloader implements ChangesViewContentProvider.Preloader {
@@ -613,9 +612,11 @@ public class ChangesViewManager implements ChangesViewEx,
 
     private void setCommitSplitOrientation() {
       boolean hasPreviewPanel = myVcsConfiguration.LOCAL_CHANGES_DETAILS_PREVIEW_SHOWN && isSplitterPreview();
-      ToolWindow tw = requireNonNull(getToolWindowFor(myProject, LOCAL_CHANGES));
-      boolean toolwindowIsHorizontal = tw.getAnchor().isHorizontal();
-      myCommitPanelSplitter.setOrientation(hasPreviewPanel || !toolwindowIsHorizontal);
+      ToolWindow tw = getToolWindowFor(myProject, LOCAL_CHANGES);
+      if (tw != null) {
+        boolean toolwindowIsHorizontal = tw.getAnchor().isHorizontal();
+        myCommitPanelSplitter.setOrientation(hasPreviewPanel || !toolwindowIsHorizontal);
+      }
     }
 
     @NotNull
@@ -686,9 +687,11 @@ public class ChangesViewManager implements ChangesViewEx,
     }
 
     public void scheduleRefresh() {
-      if (myDisposed) return;
-      myTreeUpdateAlarm.cancelAllRequests();
-      myTreeUpdateAlarm.addRequest(() -> refreshView(), 100);
+      invokeLaterIfNeeded(() -> {
+        if (myDisposed) return;
+        myTreeUpdateAlarm.cancelAllRequests();
+        myTreeUpdateAlarm.addRequest(() -> refreshView(), 100);
+      });
     }
 
     public void refreshImmediately() {
@@ -875,9 +878,7 @@ public class ChangesViewManager implements ChangesViewEx,
       super.drop(event);
       Object attachedObject = event.getAttachedObject();
       if (attachedObject instanceof ShelvedChangeListDragBean) {
-        ChangesViewToolWindowPanel panel = ((ChangesViewManager)getInstance(myProject)).initToolWindowPanel();
-        ShelveChangesManager.unshelveSilentlyWithDnd(myProject, (ShelvedChangeListDragBean)attachedObject,
-                                                     ChangesTreeDnDSupport.getDropRootNode(panel.myView, event),
+        ShelveChangesManager.unshelveSilentlyWithDnd(myProject, (ShelvedChangeListDragBean)attachedObject, null,
                                                      !ChangesTreeDnDSupport.isCopyAction(event));
       }
     }

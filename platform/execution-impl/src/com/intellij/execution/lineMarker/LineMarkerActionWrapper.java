@@ -11,6 +11,7 @@ import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.UserDataHolder;
 import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.SmartPointerManager;
@@ -26,7 +27,7 @@ import java.util.Arrays;
 /**
  * @author Dmitry Avdeev
  */
-public class LineMarkerActionWrapper extends ActionGroup implements PriorityAction, ActionWithDelegate<AnAction> {
+public class LineMarkerActionWrapper extends ActionGroup implements PriorityAction, ActionWithDelegate<AnAction>, UpdateInBackground {
   private static final Logger LOG = Logger.getInstance(LineMarkerActionWrapper.class);
   public static final Key<Pair<PsiElement, MyDataContext>> LOCATION_WRAPPER = Key.create("LOCATION_WRAPPER");
 
@@ -40,6 +41,12 @@ public class LineMarkerActionWrapper extends ActionGroup implements PriorityActi
   }
 
   @Override
+  public boolean isUpdateInBackground() {
+    return myOrigin instanceof UpdateInBackground &&
+           ((UpdateInBackground)myOrigin).isUpdateInBackground();
+  }
+
+  @Override
   public AnAction @NotNull [] getChildren(@Nullable AnActionEvent e) {
     // This is quickfix for IDEA-208231
     // See com.intellij.codeInsight.daemon.impl.GutterIntentionMenuContributor.addActions(AnAction, List<? super IntentionActionDescriptor>, GutterIconRenderer, AtomicInteger, DataContext)`
@@ -50,7 +57,7 @@ public class LineMarkerActionWrapper extends ActionGroup implements PriorityActi
         LOG.assertTrue(ContainerUtil.all(Arrays.asList(children), o -> o instanceof RunContextAction));
         return ContainerUtil.mapNotNull(children, o -> {
           PsiElement element = myElement.getElement();
-          return element != null ? new LineMarkerActionWrapper(element, o) : null;
+          return element != null ? new LineMarkerActionWrapper(element, ExecutorAction.wrap((RunContextAction)o, ((ExecutorAction)myOrigin).getOrder())) : null;
         }).toArray(AnAction.EMPTY_ARRAY);
       }
     }
@@ -97,8 +104,7 @@ public class LineMarkerActionWrapper extends ActionGroup implements PriorityActi
 
   @NotNull
   private AnActionEvent wrapEvent(@NotNull AnActionEvent e) {
-    DataContext dataContext = wrapContext(e.getDataContext());
-    return new AnActionEvent(e.getInputEvent(), dataContext, e.getPlace(), e.getPresentation(), e.getActionManager(), e.getModifiers());
+    return e.withDataContext(wrapContext(e.getDataContext()));
   }
 
   @NotNull
@@ -134,6 +140,24 @@ public class LineMarkerActionWrapper extends ActionGroup implements PriorityActi
 
     MyDataContext(DataContext delegate) {
       myDelegate = delegate;
+    }
+
+    @Override
+    public <T> T getUserData(@NotNull Key<T> key) {
+      if (myDelegate instanceof UserDataHolder) {
+        return ((UserDataHolder)myDelegate).getUserData(key);
+      }
+      return super.getUserData(key);
+    }
+
+    @Override
+    public <T> void putUserData(@NotNull Key<T> key, @Nullable T value) {
+      if (myDelegate instanceof UserDataHolder) {
+        ((UserDataHolder)myDelegate).putUserData(key, value);
+      }
+      else {
+        super.putUserData(key, value);
+      }
     }
 
     @Nullable

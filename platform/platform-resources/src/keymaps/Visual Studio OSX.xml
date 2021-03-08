@@ -270,7 +270,9 @@
     <keyboard-shortcut first-keystroke="meta E" second-keystroke="U"/>
     <keyboard-shortcut first-keystroke="meta E" second-keystroke="meta U"/>
   </action>
-  <action id="Vcs.ShowMessageHistory"/>
+  <action id="Vcs.ShowMessageHistory">
+    <keyboard-shortcut first-keystroke="control H"/>
+  </action>
   <action id="XDebugger.AttachToProcess">
     <keyboard-shortcut first-keystroke="meta alt P"/>
   </action>
@@ -441,6 +443,7 @@
   <action id="ToggleFullScreen">
     <keyboard-shortcut first-keystroke="alt shift ENTER"/>
   </action>
+  <action id="SplitChooser"/>
   <action id="SurroundWith"/>
   <action id="MethodHierarchy"/>
   <action id="ContextHelp">

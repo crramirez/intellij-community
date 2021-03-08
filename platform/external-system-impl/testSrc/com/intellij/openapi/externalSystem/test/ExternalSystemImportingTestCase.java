@@ -44,14 +44,12 @@ import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFileManager;
-import com.intellij.packaging.artifacts.Artifact;
 import com.intellij.packaging.artifacts.ArtifactManager;
 import com.intellij.psi.PsiElement;
 import com.intellij.testFramework.IdeaTestUtil;
 import com.intellij.usageView.UsageInfo;
 import com.intellij.util.BooleanFunction;
 import com.intellij.util.CommonProcessors;
-import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -62,6 +60,7 @@ import org.jetbrains.jps.model.java.JavaSourceRootType;
 import org.jetbrains.jps.model.module.JpsModuleSourceRootType;
 
 import java.io.IOException;
+import java.io.PrintStream;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiPredicate;
@@ -315,7 +314,7 @@ public abstract class ExternalSystemImportingTestCase extends ExternalSystemTest
   protected void assertExportedDeps(String moduleName, String... expectedDeps) {
     final List<String> actual = new ArrayList<>();
 
-    getRootManager(moduleName).orderEntries().withoutSdk().withoutModuleSourceEntries().exportedOnly().process(new RootPolicy<Object>() {
+    getRootManager(moduleName).orderEntries().withoutSdk().withoutModuleSourceEntries().exportedOnly().process(new RootPolicy<>() {
       @Override
       public Object visitModuleOrderEntry(@NotNull ModuleOrderEntry e, Object value) {
         actual.add(e.getModuleName());
@@ -412,7 +411,7 @@ public abstract class ExternalSystemImportingTestCase extends ExternalSystemTest
   protected void assertArtifacts(String... expectedNames) {
     final List<String> actualNames = ContainerUtil.map(
       ArtifactManager.getInstance(myProject).getAllArtifactsIncludingInvalid(),
-      (Function<Artifact, String>)artifact -> artifact.getName());
+      artifact -> artifact.getName());
 
     assertUnorderedElementsAreEqual(actualNames, expectedNames);
   }
@@ -445,7 +444,7 @@ public abstract class ExternalSystemImportingTestCase extends ExternalSystemTest
     return ModuleRootManager.getInstance(getModule(module));
   }
 
-  protected void ignoreData(BooleanFunction<DataNode<?>> booleanFunction, final boolean ignored) {
+  protected void ignoreData(BooleanFunction<? super DataNode<?>> booleanFunction, final boolean ignored) {
     final ExternalProjectInfo externalProjectInfo = ProjectDataManagerImpl.getInstance().getExternalProjectData(
       myProject, getExternalSystemId(), getCurrentExternalProjectSettings().getExternalProjectPath());
     assertNotNull(externalProjectInfo);
@@ -540,7 +539,11 @@ public abstract class ExternalSystemImportingTestCase extends ExternalSystemTest
 
   protected void printOutput(@NotNull String text, boolean stdOut) {
     if (StringUtil.isEmptyOrSpaces(text)) return;
-    (stdOut ? System.out : System.err).print(text);
+    printOutput(stdOut ? System.out : System.err, text);
+  }
+
+  protected void printOutput(@NotNull PrintStream stream, @NotNull String text) {
+    stream.print(text);
   }
 
   protected void handleImportFailure(@NotNull String errorMessage, @Nullable String errorDetails) {

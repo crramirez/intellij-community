@@ -6,10 +6,12 @@ import com.intellij.codeInspection.dataFlow.value.RelationType;
 import com.intellij.codeInspection.util.OptionalUtil;
 import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.psi.*;
+import com.intellij.psi.util.InheritanceUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.siyeh.ig.callMatcher.CallMapper;
 import com.siyeh.ig.callMatcher.CallMatcher;
+import com.siyeh.ig.psiutils.ConstructionUtils;
 import com.siyeh.ig.psiutils.MethodUtils;
 import com.siyeh.ig.psiutils.TypeUtils;
 import org.jetbrains.annotations.NotNull;
@@ -41,6 +43,30 @@ public final class HardcodedContracts {
     instanceCall(JAVA_UTIL_QUEUE, "poll").parameterCount(0),
     instanceCall("java.util.Deque", "pollFirst", "pollLast").parameterCount(0)
     );
+  private static final Set<String> PURE_ARRAY_METHODS = Set.of("binarySearch", "spliterator", "stream", "equals", "deepEquals");
+  private static final CallMatcher NO_PARAMETER_LEAK_METHODS =
+    anyOf(
+      instanceCall(JAVA_UTIL_COLLECTION, "addAll", "removeAll", "retainAll").parameterTypes(JAVA_UTIL_COLLECTION),
+      instanceCall(JAVA_UTIL_LIST, "addAll").parameterTypes("int", JAVA_UTIL_COLLECTION),
+      instanceCall(JAVA_UTIL_MAP, "putAll").parameterTypes(JAVA_UTIL_MAP));
+
+  /**
+   * @param method method to test
+   * @return true if given method doesn't spoil the arguments' locality
+   */
+  static boolean isKnownNoParameterLeak(@Nullable PsiMethod method) {
+    if (method == null) return false;
+    if (ConstructionUtils.isCollectionConstructor(method)) {
+      PsiClass aClass = method.getContainingClass();
+      if (aClass != null) {
+        String name = aClass.getQualifiedName();
+        return name != null && name.startsWith("java.util.") &&
+               (InheritanceUtil.isInheritor(aClass, JAVA_UTIL_COLLECTION) ||
+                InheritanceUtil.isInheritor(aClass, JAVA_UTIL_MAP));
+      }
+    }
+    return NO_PARAMETER_LEAK_METHODS.methodMatches(method);
+  }
 
   @FunctionalInterface
   interface ContractProvider {
@@ -502,8 +528,8 @@ public final class HardcodedContracts {
       return MutationSignature.unknown();
     }
     if (JAVA_UTIL_ARRAYS.equals(className)) {
-      return name.equals("binarySearch") || name.equals("spliterator") || name.equals("stream") ? MutationSignature.pure() :
-      // else: fill, parallelPrefix, parallelSort, sort
+      return PURE_ARRAY_METHODS.contains(name) ? MutationSignature.pure() :
+             // else: fill, parallelPrefix, parallelSort, sort
              MutationSignature.pure().alsoMutatesArg(0);
     }
     if (QUEUE_POLL.methodMatches(method)) {

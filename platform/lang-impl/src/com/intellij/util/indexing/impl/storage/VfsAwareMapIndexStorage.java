@@ -21,13 +21,13 @@ import java.io.IOException;
 import java.nio.file.FileSystem;
 import java.nio.file.Path;
 
-public final class VfsAwareMapIndexStorage<Key, Value> extends MapIndexStorage<Key, Value> implements VfsAwareIndexStorage<Key, Value> {
+public class VfsAwareMapIndexStorage<Key, Value> extends MapIndexStorage<Key, Value> implements VfsAwareIndexStorage<Key, Value> {
   private final boolean myBuildKeyHashToVirtualFileMapping;
   @Nullable
   private KeyHashLog<Key> myKeyHashToVirtualFileMapping;
 
   @TestOnly
-  public VfsAwareMapIndexStorage(@NotNull Path storageFile,
+  public VfsAwareMapIndexStorage(Path storageFile,
                                  @NotNull KeyDescriptor<Key> keyDescriptor,
                                  @NotNull DataExternalizer<Value> valueExternalizer,
                                  final int cacheSize,
@@ -37,7 +37,7 @@ public final class VfsAwareMapIndexStorage<Key, Value> extends MapIndexStorage<K
     myBuildKeyHashToVirtualFileMapping = false;
   }
 
-  public VfsAwareMapIndexStorage(@NotNull Path storageFile,
+  public VfsAwareMapIndexStorage(Path storageFile,
                                  @NotNull KeyDescriptor<Key> keyDescriptor,
                                  @NotNull DataExternalizer<Value> valueExternalizer,
                                  final int cacheSize,
@@ -51,7 +51,7 @@ public final class VfsAwareMapIndexStorage<Key, Value> extends MapIndexStorage<K
   @Override
   protected void initMapAndCache() throws IOException {
     super.initMapAndCache();
-    if (myBuildKeyHashToVirtualFileMapping) {
+    if (myBuildKeyHashToVirtualFileMapping && myBaseStorageFile != null) {
       FileSystem projectFileFS = myBaseStorageFile.getFileSystem();
       assert !projectFileFS.isReadOnly() : "File system " + projectFileFS + " is read only";
       myKeyHashToVirtualFileMapping = new KeyHashLog<>(myKeyDescriptor, myBaseStorageFile);
@@ -67,7 +67,7 @@ public final class VfsAwareMapIndexStorage<Key, Value> extends MapIndexStorage<K
   }
 
   @Override
-  public void flush() {
+  public void flush() throws IOException {
     l.lock();
     try {
       super.flush();

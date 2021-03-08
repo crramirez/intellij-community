@@ -4,6 +4,7 @@ package com.intellij.ui;
 import com.intellij.openapi.util.NlsContexts;
 import com.intellij.ui.components.panels.NonOpaquePanel;
 import com.intellij.ui.components.panels.OpaquePanel;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.accessibility.AccessibleContextUtil;
 
@@ -14,8 +15,6 @@ import javax.swing.border.Border;
 import javax.swing.border.EmptyBorder;
 import javax.swing.tree.TreeCellRenderer;
 import java.awt.*;
-
-import static com.intellij.ui.RelativeFont.BOLD;
 
 public abstract class GroupedElementsRenderer implements Accessible {
   protected SeparatorWithText mySeparatorComponent = createSeparator();
@@ -53,6 +52,7 @@ public abstract class GroupedElementsRenderer implements Accessible {
 
     myTextLabel.setIcon(icon);
     myTextLabel.setDisabledIcon(disabledIcon);
+    myTextLabel.setIconTextGap(JBUI.CurrentTheme.ActionsList.elementIconGap());
 
     setSelected(myComponent, isSelected);
     setSelected(myTextLabel, isSelected);
@@ -76,7 +76,7 @@ public abstract class GroupedElementsRenderer implements Accessible {
   }
 
   protected void setSeparatorFont(Font font) {
-    mySeparatorComponent.setFont(BOLD.derive(font));
+    mySeparatorComponent.setFont(font);
   }
 
   protected abstract Color getSelectionBackground();
@@ -92,7 +92,7 @@ public abstract class GroupedElementsRenderer implements Accessible {
   }
 
   private static Border getBorder() {
-    return new EmptyBorder(UIUtil.getListCellPadding());
+    return new EmptyBorder(JBUI.CurrentTheme.ActionsList.cellPadding());
   }
 
   public abstract static class List extends GroupedElementsRenderer {

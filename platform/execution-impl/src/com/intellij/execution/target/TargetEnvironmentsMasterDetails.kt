@@ -14,7 +14,6 @@ import com.intellij.ui.ColoredTreeCellRenderer
 import com.intellij.ui.CommonActionsPanel
 import com.intellij.ui.LayeredIcon
 import com.intellij.ui.SimpleTextAttributes
-import com.intellij.util.IconUtil
 import com.intellij.util.PlatformIcons
 import com.intellij.util.containers.toArray
 import com.intellij.util.text.UniqueNameGenerator
@@ -40,16 +39,16 @@ class TargetEnvironmentsMasterDetails @JvmOverloads constructor(
     // note that `MasterDetailsComponent` does not work without `initTree()`
     initTree()
     myTree.cellRenderer = TargetEnvironmentRenderer()
-    myTree.emptyText.text = "No targets added"
+    myTree.emptyText.text = ExecutionBundle.message("targets.details.status.empty.text")
     myTree.emptyText.appendSecondaryText(ExecutionBundle.message("targets.details.status.text.add.new.target"),
-                                         SimpleTextAttributes.LINK_ATTRIBUTES) {
+                                         SimpleTextAttributes.LINK_PLAIN_ATTRIBUTES) {
       val popup = ActionManager.getInstance().createActionPopupMenu("TargetEnvironmentsConfigurable.EmptyListText", CreateNewTargetGroup())
       val size = myTree.emptyText.preferredSize
       val textY = myTree.height / if (myTree.emptyText.isShowAboveCenter) 3 else 2
       popup.component.show(myTree, (myTree.width - size.width) / 2, textY + size.height)
     }
     val shortcutText = KeymapUtil.getFirstKeyboardShortcutText(CommonActionsPanel.getCommonShortcut(CommonActionsPanel.Buttons.ADD))
-    myTree.emptyText.appendSecondaryText(" ($shortcutText)", StatusText.DEFAULT_ATTRIBUTES, null)
+    myTree.emptyText.appendSecondaryText(" $shortcutText", StatusText.DEFAULT_ATTRIBUTES, null)
   }
 
   override fun getDisplayName(): String = ExecutionBundle.message("targets.details.configurable.name.remote.targets")
@@ -123,7 +122,7 @@ class TargetEnvironmentsMasterDetails @JvmOverloads constructor(
 
   private inner class CreateNewTargetAction<T : TargetEnvironmentConfiguration>(private val project: Project,
                                                                                 private val type: TargetEnvironmentType<T>)
-    : DumbAwareAction(type.displayName, null, type.icon) {
+    : DumbAwareAction(ExecutionBundle.message("targets.details.action.new.target.of.type.text", type.displayName), null, type.icon) {
 
     override fun actionPerformed(e: AnActionEvent) {
       val newConfig: TargetEnvironmentConfiguration
@@ -152,7 +151,7 @@ class TargetEnvironmentsMasterDetails @JvmOverloads constructor(
   }
 
   private inner class CreateNewTargetGroup : ActionGroup(ExecutionBundle.message("targets.details.action.add.text"),
-                                                         "", IconUtil.getAddIcon()),
+                                                         "", LayeredIcon.ADD_WITH_DROPDOWN),
                                              ActionGroupWithPreselection, DumbAware {
     init {
       registerCustomShortcutSet(CommonActionsPanel.getCommonShortcut(CommonActionsPanel.Buttons.ADD), myTree)

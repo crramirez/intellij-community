@@ -1,7 +1,6 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.psi.impl;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.intellij.core.CoreBundle;
 import com.intellij.injected.editor.DocumentWindow;
 import com.intellij.lang.ASTNode;
@@ -38,6 +37,7 @@ import com.intellij.psi.text.BlockSupport;
 import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.util.*;
 import com.intellij.util.concurrency.Semaphore;
+import com.intellij.util.containers.CollectionFactory;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.EdtInvocationManager;
 import org.jetbrains.annotations.*;
@@ -51,13 +51,13 @@ public abstract class PsiDocumentManagerBase extends PsiDocumentManager implemen
   static final Logger LOG = Logger.getInstance(PsiDocumentManagerBase.class);
   private static final Key<Document> HARD_REF_TO_DOCUMENT = Key.create("HARD_REFERENCE_TO_DOCUMENT");
 
-  private final Map<Document, List<Runnable>> myActionsAfterCommit = ContainerUtil.createConcurrentWeakMap();
+  private final Map<Document, List<Runnable>> myActionsAfterCommit = CollectionFactory.createConcurrentWeakMap();
 
   protected final Project myProject;
   private final PsiManager myPsiManager;
   protected final DocumentCommitProcessor myDocumentCommitProcessor;
 
-  final Set<Document> myUncommittedDocuments = Collections.newSetFromMap(ContainerUtil.createConcurrentWeakMap());
+  final Set<Document> myUncommittedDocuments = Collections.newSetFromMap(CollectionFactory.createConcurrentWeakMap());
   private final Map<Document, UncommittedInfo> myUncommittedInfos = new ConcurrentHashMap<>();
   private /*non-static*/ final Key<UncommittedInfo> FREE_THREADED_UNCOMMITTED_INFO = Key.create("FREE_THREADED_UNCOMMITTED_INFO");
 
@@ -104,16 +104,17 @@ public abstract class PsiDocumentManagerBase extends PsiDocumentManager implemen
     return psiFile;
   }
 
-  public void associatePsi(@NotNull Document document, @Nullable PsiFile file) {
-    if (file != null) {
-      VirtualFile vFile = file.getViewProvider().getVirtualFile();
-      Document cachedDocument = FileDocumentManager.getInstance().getCachedDocument(vFile);
-      if (cachedDocument != null && cachedDocument != document) {
-        throw new IllegalStateException("Can't replace existing document");
-      }
-
-      FileDocumentManagerBase.registerDocument(document, vFile);
+  public void associatePsi(@NotNull Document document, @NotNull PsiFile file) {
+    if (file.getProject() != myProject) {
+      throw new IllegalArgumentException("Method associatePsi() called with file from the wrong project. Expected: "+myProject+" but got: "+file.getProject());
     }
+    VirtualFile vFile = file.getViewProvider().getVirtualFile();
+    Document cachedDocument = FileDocumentManager.getInstance().getCachedDocument(vFile);
+    if (cachedDocument != null && cachedDocument != document) {
+      throw new IllegalStateException("Can't replace existing document");
+    }
+
+    FileDocumentManagerBase.registerDocument(document, vFile);
   }
 
   @Override
@@ -204,6 +205,7 @@ public abstract class PsiDocumentManagerBase extends PsiDocumentManager implemen
           // another thread has just committed it, everything's fine
           continue;
         }
+        @SuppressWarnings("TestOnlyProblems")
         boolean success = doCommitWithoutReparse(document);
         LOG.error("Committed document in uncommitted set: " + document + ", force-committed=" + success);
       }
@@ -258,7 +260,7 @@ public abstract class PsiDocumentManagerBase extends PsiDocumentManager implemen
                                                                              true, myProject);
   }
 
-  @VisibleForTesting
+  @TestOnly
   public boolean doCommitWithoutReparse(@NotNull Document document) {
     return finishCommitInWriteAction(document, Collections.emptyList(), Collections.emptyList(), true, true);
   }
@@ -309,12 +311,13 @@ public abstract class PsiDocumentManagerBase extends PsiDocumentManager implemen
 
   @ApiStatus.Internal
   public void addRunOnCommit(@NotNull Document document, @NotNull Runnable action) {
-    myActionsAfterCommit.computeIfAbsent(document, __ -> new SmartList<>()).add(action);
+    myActionsAfterCommit.computeIfAbsent(document, __ -> ContainerUtil.createConcurrentList()).add(action);
   }
 
-  private List<Runnable> getAndClearActionsAfterCommit(@NotNull Document document) {
+  @NotNull
+  private Runnable @NotNull [] getAndClearActionsAfterCommit(@NotNull Document document) {
     List<Runnable> list = myActionsAfterCommit.remove(document);
-    return list != null ? new ArrayList<>(list) : null;
+    return list == null ? ArrayUtil.EMPTY_RUNNABLE_ARRAY : list.toArray(ArrayUtil.EMPTY_RUNNABLE_ARRAY);
   }
 
   @Override
@@ -654,15 +657,15 @@ public abstract class PsiDocumentManagerBase extends PsiDocumentManager implemen
     if (!app.isDispatchThread() && isEventSystemEnabled(document)) {
       // have to run in EDT to guarantee data structure safe access and "execute in EDT" callbacks contract
       app.invokeLater(()-> {
-        if (!myProject.isDisposed() && isCommitted(document)) runAfterCommitActions(document);
+        if (!myProject.isDisposed() && isCommitted(document)) {
+          runAfterCommitActions(document);
+        }
       });
       return;
     }
-    List<Runnable> list = getAndClearActionsAfterCommit(document);
-    if (list != null) {
-      for (Runnable runnable : list) {
-        runnable.run();
-      }
+    Runnable[] list = getAndClearActionsAfterCommit(document);
+    for (Runnable runnable : list) {
+      runnable.run();
     }
 
     if (mayRunActionsWhenAllCommitted()) {
@@ -736,11 +739,6 @@ public abstract class PsiDocumentManagerBase extends PsiDocumentManager implemen
   @Override
   public void addListener(@NotNull Listener listener) {
     myListeners.add(listener);
-  }
-
-  @Override
-  public void removeListener(@NotNull Listener listener) {
-    myListeners.remove(listener);
   }
 
   @Override
@@ -1010,7 +1008,7 @@ public abstract class PsiDocumentManagerBase extends PsiDocumentManager implemen
         // we can end up outside write action here if the document has forUseInNonAWTThread=true
         ApplicationManager.getApplication().runWriteAction((ExternalChangeAction)() ->
           ((AbstractFileViewProvider)viewProvider).onContentReload());
-      } 
+      }
       else if (FileIndexFacade.getInstance(myProject).isInContent(virtualFile)) {
         ApplicationManager.getApplication().runWriteAction((ExternalChangeAction)() ->
           ((FileManagerImpl)fileManager).firePropertyChangedForUnloadedPsi());

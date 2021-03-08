@@ -23,6 +23,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
+import java.awt.*;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.util.HashMap;
@@ -169,7 +170,8 @@ public class TextEditorWithPreview extends UserDataHolderBase implements TextEdi
     myComponent.repaint();
 
     final JComponent focusComponent = getPreferredFocusedComponent();
-    if (focusComponent != null) {
+    Component focusOwner = IdeFocusManager.findInstance().getFocusOwner();
+    if (focusComponent != null && focusOwner != null && SwingUtilities.isDescendingFrom(focusOwner, getComponent())) {
       IdeFocusManager.findInstanceByComponent(focusComponent).requestFocus(focusComponent, true);
     }
   }
@@ -263,7 +265,7 @@ public class TextEditorWithPreview extends UserDataHolderBase implements TextEdi
     }
 
     @Override
-    public boolean canBeMergedWith(FileEditorState otherState, FileEditorStateLevel level) {
+    public boolean canBeMergedWith(@NotNull FileEditorState otherState, @NotNull FileEditorStateLevel level) {
       return otherState instanceof MyFileEditorState
              && (myFirstState == null || myFirstState.canBeMergedWith(((MyFileEditorState)otherState).myFirstState, level))
              && (mySecondState == null || mySecondState.canBeMergedWith(((MyFileEditorState)otherState).mySecondState, level));

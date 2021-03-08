@@ -18,10 +18,7 @@ package com.intellij.openapi.vcs;
 
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
-import org.jetbrains.annotations.Nls;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.SystemIndependent;
+import org.jetbrains.annotations.*;
 
 import java.util.Objects;
 import java.util.function.Supplier;
@@ -65,15 +62,6 @@ public class VcsDirectoryMapping {
     return myDirectory;
   }
 
-  /**
-   * @deprecated Use {@link #getDirectory()}
-   */
-  @NotNull
-  @Deprecated
-  public String systemIndependentPath() {
-    return myDirectory;
-  }
-
   @NotNull
   public String getVcs() {
     return myVcs;
@@ -97,6 +85,7 @@ public class VcsDirectoryMapping {
    * @deprecated Use constructor parameter
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public void setRootSettings(final VcsRootSettings rootSettings) {
     myRootSettings = rootSettings;
   }

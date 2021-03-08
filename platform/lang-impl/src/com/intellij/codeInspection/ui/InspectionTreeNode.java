@@ -21,7 +21,7 @@ import javax.swing.tree.TreeNode;
 import java.util.*;
 
 public abstract class InspectionTreeNode implements TreeNode {
-  private static final Interner<LevelAndCount[]> LEVEL_AND_COUNT_INTERNER = new WeakInterner<>(new TObjectHashingStrategy<LevelAndCount[]>() {
+  private static final Interner<LevelAndCount[]> LEVEL_AND_COUNT_INTERNER = new WeakInterner<>(new TObjectHashingStrategy<>() {
     @Override
     public int computeHashCode(LevelAndCount[] object) {
       return Arrays.hashCode(object);
@@ -70,10 +70,10 @@ public abstract class InspectionTreeNode implements TreeNode {
     return true;
   }
 
-  protected void visitProblemSeverities(@NotNull Object2IntOpenHashMap<HighlightDisplayLevel> counter) {
+  protected void visitProblemSeverities(@NotNull Object2IntMap<HighlightDisplayLevel> counter) {
     for (InspectionTreeNode child : getChildren()) {
       for (LevelAndCount levelAndCount : child.getProblemLevels()) {
-        counter.addTo(levelAndCount.getLevel(), levelAndCount.getCount());
+        counter.mergeInt(levelAndCount.getLevel(), levelAndCount.getCount(), Math::addExact);
       }
     }
   }
@@ -196,7 +196,7 @@ public abstract class InspectionTreeNode implements TreeNode {
     private volatile LevelAndCount[] myLevels;
 
     private LevelAndCount @NotNull [] compute() {
-      Object2IntOpenHashMap<HighlightDisplayLevel> counter = new Object2IntOpenHashMap<>();
+      Object2IntMap<HighlightDisplayLevel> counter=new Object2IntOpenHashMap<>();
       visitProblemSeverities(counter);
       LevelAndCount[] arr = new LevelAndCount[counter.size()];
       final int[] i = {0};

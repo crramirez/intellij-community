@@ -118,14 +118,6 @@ public abstract class LanguageCodeStyleSettingsProvider extends CodeStyleSetting
   }
 
   /**
-   * @deprecated use {@link PredefinedCodeStyle} extension point instead
-   */
-  @Deprecated
-  public PredefinedCodeStyle @NotNull [] getPredefinedCodeStyles() {
-    return PredefinedCodeStyle.EMPTY_ARRAY;
-  }
-
-  /**
    * @deprecated use {@link #getPriority()}
    */
   @Deprecated
@@ -392,7 +384,7 @@ public abstract class LanguageCodeStyleSettingsProvider extends CodeStyleSetting
     ourSettingsPagesProviders.get().remove(provider);
   }
 
-  private static void registerSettingsPageProvider(@NotNull Set<LanguageCodeStyleSettingsProvider> settingsPagesProviders,
+  private static void registerSettingsPageProvider(@NotNull Set<? super LanguageCodeStyleSettingsProvider> settingsPagesProviders,
                                                    @NotNull LanguageCodeStyleSettingsProvider provider) {
     try {
       Method

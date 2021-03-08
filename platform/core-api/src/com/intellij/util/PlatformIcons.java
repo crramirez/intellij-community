@@ -46,11 +46,6 @@ public interface PlatformIcons {
   Icon NEW_PARAMETER = AllIcons.Hierarchy.Supertypes;
   Icon ASPECT_ICON = AllIcons.Nodes.Aspect;
 
-  /**
-   * @deprecated use {@link AllIcons.Nodes#Tag}
-   */
-  @Deprecated
-  Icon ADVICE_ICON = AllIcons.Nodes.Tag;
   Icon ERROR_INTRODUCTION_ICON = AllIcons.Nodes.ErrorIntroduction;
   Icon WARNING_INTRODUCTION_ICON = AllIcons.Nodes.WarningIntroduction;
   Icon JAVA_OUTSIDE_SOURCE_ICON = AllIcons.FileTypes.JavaOutsideSource;
@@ -100,6 +95,7 @@ public interface PlatformIcons {
    * @deprecated use {@link #CONTENT_ROOT_ICON_CLOSED}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   Icon CONTENT_ROOT_ICON_OPEN = CONTENT_ROOT_ICON_CLOSED;
 
   Icon UP_DOWN_ARROWS = AllIcons.Ide.UpDown;
@@ -119,5 +115,6 @@ public interface PlatformIcons {
    * @deprecated use {@link #FOLDER_ICON}
    */
   @Deprecated
+    @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   Icon DIRECTORY_OPEN_ICON = FOLDER_ICON;
 }

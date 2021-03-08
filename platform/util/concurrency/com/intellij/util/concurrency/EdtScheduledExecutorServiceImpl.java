@@ -1,8 +1,11 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.util.concurrency;
 
 import com.intellij.codeWithMe.ClientId;
+import com.intellij.openapi.application.Application;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
+import com.intellij.util.ConcurrencyUtil;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
@@ -27,7 +30,10 @@ final class EdtScheduledExecutorServiceImpl extends SchedulingWrapper implements
     MyScheduledFutureTask<?> task = new MyScheduledFutureTask<Void>(ClientId.decorateRunnable(command), null, triggerTime(delayQueue, delay, unit)){
       @Override
       void executeMeInBackendExecutor() {
-        EdtExecutorService.getInstance().execute(this, modalityState);
+        EdtExecutorService.getInstance().execute(this, modalityState, (o) -> {
+          Application application = ApplicationManager.getApplication();
+          return this.isCancelled() || application == null || application.isDisposed();
+        });
       }
     };
     return delayedExecute(task);
@@ -36,7 +42,7 @@ final class EdtScheduledExecutorServiceImpl extends SchedulingWrapper implements
   @Override
   void futureDone(@NotNull Future<?> task) {
     if (EdtExecutorServiceImpl.shouldManifestExceptionsImmediately()) {
-      EdtExecutorServiceImpl.manifestExceptionsIn(task);
+      ConcurrencyUtil.manifestExceptionsIn(task);
     }
   }
 

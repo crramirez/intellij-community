@@ -22,6 +22,7 @@ import com.intellij.ui.popup.list.GroupedItemsListRenderer;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.JBUI;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.jps.model.serialization.PathMacroUtil;
@@ -116,7 +117,7 @@ public final class MacrosDialog extends DialogWrapper {
 
     List<Macro> macros = ContainerUtil.filter(MacroManager.getInstance().getMacros(),
                                               macro -> MacroFilter.GLOBAL.accept(macro) && filter.test(macro));
-    macros.sort(new Comparator<Macro>() {
+    macros.sort(new Comparator<>() {
       @Override
       public int compare(Macro macro1, Macro macro2) {
         String name1 = macro1.getName();
@@ -148,7 +149,7 @@ public final class MacrosDialog extends DialogWrapper {
     }
 
     final Item finalFirstMacro = firstMacro;
-    myMacrosList.setCellRenderer(new GroupedItemsListRenderer<>(new ListItemDescriptorAdapter<Item>() {
+    myMacrosList.setCellRenderer(new GroupedItemsListRenderer<>(new ListItemDescriptorAdapter<>() {
       @Override
       public String getTextFor(Item value) {
         return value.toString(); //NON-NLS
@@ -328,6 +329,7 @@ public final class MacrosDialog extends DialogWrapper {
    * @deprecated Doesn't support user-defined path macros, use {@link #getSelectedMacroName()} instead.
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.2")
   public Macro getSelectedMacro() {
     final Item item = myMacrosList.getSelectedValue();
     if (item instanceof MacroWrapper) {

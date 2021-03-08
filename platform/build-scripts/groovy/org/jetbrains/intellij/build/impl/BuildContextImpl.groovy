@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.intellij.build.impl
 
 import com.intellij.openapi.util.Pair
@@ -32,7 +32,7 @@ final class BuildContextImpl extends BuildContext {
   private final CompilationContextImpl compilationContext
 
   // thread-safe - forkForParallelTask pass it to child context
-  private final ConcurrentLinkedQueue<Path> resourceFiles
+  private final ConcurrentLinkedQueue<Pair<Path, String>> distFiles
 
   static BuildContextImpl create(String communityHome, String projectHome, ProductProperties productProperties,
                                  ProprietaryBuildTools proprietaryBuildTools, BuildOptions options) {
@@ -52,11 +52,11 @@ final class BuildContextImpl extends BuildContext {
                            LinuxDistributionCustomizer linuxDistributionCustomizer,
                            MacDistributionCustomizer macDistributionCustomizer,
                            ProprietaryBuildTools proprietaryBuildTools,
-                           @NotNull ConcurrentLinkedQueue<Path> resourceFiles) {
+                           @NotNull ConcurrentLinkedQueue<Pair<Path, String>> distFiles) {
     this.compilationContext = compilationContext
     this.global = compilationContext.global
     this.productProperties = productProperties
-    this.resourceFiles = resourceFiles
+    this.distFiles = distFiles
     this.proprietaryBuildTools = proprietaryBuildTools == null ? ProprietaryBuildTools.DUMMY : proprietaryBuildTools
     this.windowsDistributionCustomizer = windowsDistributionCustomizer
     this.linuxDistributionCustomizer = linuxDistributionCustomizer
@@ -81,16 +81,17 @@ final class BuildContextImpl extends BuildContext {
 
     bootClassPathJarNames = List.of("bootstrap.jar", "util.jar", "jdom.jar", "log4j.jar", "jna.jar")
     dependenciesProperties = new DependenciesProperties(this)
+    messages.info("Build steps to be skipped: ${options.buildStepsToSkip.join(',')}")
   }
 
   @Override
-  void addResourceFile(@NotNull Path file) {
+  void addDistFile(@NotNull Pair<Path, String> file) {
     messages.debug("$file requested to be added to app resources")
-    resourceFiles.add(file)
+    distFiles.add(file)
   }
 
-  @NotNull Collection<Path> getResourceFiles() {
-    return List.copyOf(resourceFiles)
+  @NotNull Collection<Pair<Path, String>> getDistFiles() {
+    return List.copyOf(distFiles)
   }
 
   private String readSnapshotBuildNumber() {
@@ -243,9 +244,10 @@ final class BuildContextImpl extends BuildContext {
   @Override
   void signExeFile(String path) {
     if (proprietaryBuildTools.signTool != null) {
-      messages.progress("Signing $path")
-      proprietaryBuildTools.signTool.signExeFile(path, this)
-      messages.info("Signed $path")
+      executeStep("Signing $path", BuildOptions.WIN_SIGN_STEP) {
+        proprietaryBuildTools.signTool.signExeFile(path, this)
+        messages.info("Signed $path")
+      }
     }
     else {
       messages.warning("Sign tool isn't defined, $path won't be signed")
@@ -287,7 +289,7 @@ final class BuildContextImpl extends BuildContext {
       compilationContext.createCopy(ant, messages, options, createBuildOutputRootEvaluator(compilationContext.paths.projectHome, productProperties))
     def copy = new BuildContextImpl(compilationContextCopy, productProperties,
                                     windowsDistributionCustomizer, linuxDistributionCustomizer, macDistributionCustomizer,
-                                    proprietaryBuildTools, resourceFiles)
+                                    proprietaryBuildTools, distFiles)
     copy.paths.artifacts = paths.artifacts
     return copy
   }
@@ -304,7 +306,7 @@ final class BuildContextImpl extends BuildContext {
       compilationContext.createCopy(ant, messages, options, createBuildOutputRootEvaluator(paths.projectHome, productProperties))
     def copy = new BuildContextImpl(compilationContextCopy, productProperties,
                                     windowsDistributionCustomizer, linuxDistributionCustomizer, macDistributionCustomizer,
-                                    proprietaryBuildTools, new ConcurrentLinkedQueue<Path>())
+                                    proprietaryBuildTools, new ConcurrentLinkedQueue<>())
     copy.paths.artifacts = paths.artifacts
     copy.compilationContext.prepareForBuild()
     return copy
@@ -312,11 +314,6 @@ final class BuildContextImpl extends BuildContext {
 
   @Override
   boolean includeBreakGenLibraries() {
-    return isJavaSupportedInProduct()
-  }
-
-  @Override
-  boolean shouldIDECopyJarsByDefault() {
     return isJavaSupportedInProduct()
   }
 

@@ -68,6 +68,7 @@ class GitStageLineStatusTracker(
   private val LOCK: DocumentTracker.Lock = DocumentTracker.Lock()
 
   private val blockOperations: LineStatusTrackerBlockOperations<StagedRange, StagedRange> = MyBlockOperations(LOCK)
+  private val stagedBlockOperations: LineStatusTrackerBlockOperations<Range, BlockI> = MyStagedBlockOperations(LOCK)
   private val stagedTracker: DocumentTracker
   private val unstagedTracker: DocumentTracker
 
@@ -183,6 +184,8 @@ class GitStageLineStatusTracker(
   override fun transferLineFromVcs(line: Int, approximate: Boolean): Int = blockOperations.transferLineFromVcs(line, approximate)
   override fun transferLineToVcs(line: Int, approximate: Boolean): Int = blockOperations.transferLineToVcs(line, approximate)
 
+  fun transferLineFromLocalToStaged(line: Int, approximate: Boolean): Int = stagedBlockOperations.transferLineToVcs(line, approximate)
+  fun transferLineFromStagedToLocal(line: Int, approximate: Boolean): Int = stagedBlockOperations.transferLineFromVcs(line, approximate)
 
   override fun scrollAndShowHint(range: Range, editor: Editor) {
     renderer.scrollAndShow(editor, range)
@@ -359,23 +362,25 @@ class GitStageLineStatusTracker(
     }
 
     private fun paintStageLines(g: Graphics2D, editor: Editor, block: List<ChangedLines<StageLineFlags>>) {
+      val borderColor = LineStatusMarkerDrawUtil.getGutterBorderColor(editor)
+
       val area = LineStatusMarkerDrawUtil.getGutterArea(editor)
       val x = area.first
       val endX = area.second
       val midX = (endX + x + 3) / 2
 
+      val y = block.first().y1
+      val endY = block.last().y2
+
       for (change in block) {
-        if (change.y1 != change.y2) {
+        if (change.y1 != change.y2 &&
+            change.flags.isUnstaged) {
           val start = change.y1
           val end = change.y2
           val gutterColor = LineStatusMarkerDrawUtil.getGutterColor(change.type, editor)
 
-          if (change.flags.isUnstaged && change.flags.isStaged) {
+          if (change.flags.isStaged) {
             LineStatusMarkerDrawUtil.paintRect(g, gutterColor, null, x, start, midX, end)
-            LineStatusMarkerDrawUtil.paintRect(g, null, gutterColor, x, start, endX, end)
-          }
-          else if (change.flags.isStaged) {
-            LineStatusMarkerDrawUtil.paintRect(g, null, gutterColor, x, start, endX, end)
           }
           else {
             LineStatusMarkerDrawUtil.paintRect(g, gutterColor, null, x, start, endX, end)
@@ -383,25 +388,42 @@ class GitStageLineStatusTracker(
         }
       }
 
+      if (borderColor == null) {
+        for (change in block) {
+          if (change.y1 != change.y2 &&
+              change.flags.isStaged) {
+            val start = change.y1
+            val end = change.y2
+            val stagedBorderColor = LineStatusMarkerDrawUtil.getIgnoredGutterBorderColor(change.type, editor)
+
+            LineStatusMarkerDrawUtil.paintRect(g, null, stagedBorderColor, x, start, endX, end)
+          }
+        }
+      }
+      else if (y != endY) {
+        LineStatusMarkerDrawUtil.paintRect(g, null, borderColor, x, y, endX, endY)
+      }
+
       for (change in block) {
         if (change.y1 == change.y2) {
           val start = change.y1
           val gutterColor = LineStatusMarkerDrawUtil.getGutterColor(change.type, editor)
+          val stagedBorderColor = borderColor ?: LineStatusMarkerDrawUtil.getIgnoredGutterBorderColor(change.type, editor)
 
           if (change.flags.isUnstaged && change.flags.isStaged) {
-            paintStripeTriangle(g, editor, gutterColor, x, endX, start)
+            paintStripeTriangle(g, editor, gutterColor, stagedBorderColor, x, endX, start)
           }
           else if (change.flags.isStaged) {
-            LineStatusMarkerDrawUtil.paintTriangle(g, editor, null, gutterColor, x, endX, start)
+            LineStatusMarkerDrawUtil.paintTriangle(g, editor, null, stagedBorderColor, x, endX, start)
           }
           else {
-            LineStatusMarkerDrawUtil.paintTriangle(g, editor, gutterColor, null, x, endX, start)
+            LineStatusMarkerDrawUtil.paintTriangle(g, editor, gutterColor, borderColor, x, endX, start)
           }
         }
       }
     }
 
-    private fun paintStripeTriangle(g: Graphics2D, editor: Editor, color: Color?, x1: Int, x2: Int, y: Int) {
+    private fun paintStripeTriangle(g: Graphics2D, editor: Editor, color: Color?, borderColor: Color?, x1: Int, x2: Int, y: Int) {
       @Suppress("NAME_SHADOWING") var y = y
       val editorScale = if (editor is EditorImpl) editor.scale else 1.0f
       val size = JBUIScale.scale(5 * editorScale).toInt()
@@ -413,7 +435,10 @@ class GitStageLineStatusTracker(
       if (color != null) {
         g.color = color
         g.fillPolygon(xPoints, yPointsFill, xPoints.size)
+      }
 
+      if (borderColor != null) {
+        g.color = borderColor
         val oldStroke = g.stroke
         g.stroke = BasicStroke(JBUIScale.scale(1).toFloat())
         g.drawPolygon(xPoints, yPointsBorder, xPoints.size)
@@ -737,6 +762,11 @@ class GitStageLineStatusTracker(
     override fun getBlocks(): List<StagedRange>? = if (isValid()) blocks else null
     override fun StagedRange.toRange(): StagedRange = this
   }
+
+  private inner class MyStagedBlockOperations(lock: DocumentTracker.Lock) : LineStatusTrackerBlockOperations<Range, BlockI>(lock) {
+    override fun getBlocks(): List<BlockI>? = if (isValid()) unstagedTracker.blocks else null
+    override fun BlockI.toRange(): Range = Range(start, end, vcsStart, vcsEnd)
+  }
 }
 
 class StagedRange(line1: Int, line2: Int,
@@ -750,7 +780,7 @@ class StagedRange(line1: Int, line2: Int,
   override val vcsEnd: Int get() = vcsLine2
   override val isEmpty: Boolean get() = line1 == line2 && stagedLine1 == stagedLine2 && vcsLine1 == vcsLine2
 
-  fun hasStagedLines() : Boolean = stagedLine1 != stagedLine2
+  fun hasStagedLines(): Boolean = stagedLine1 != stagedLine2
 }
 
 private class BlockMerger(private val staged: List<DocumentTracker.Block>,

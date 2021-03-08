@@ -1,15 +1,19 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.space.vcs.share
 
 import circlet.client.api.RepoDetails
 import circlet.client.api.identifier
 import circlet.client.api.impl.vcsPasswords
-import circlet.client.td
 import com.intellij.CommonBundle
 import com.intellij.dvcs.repo.VcsRepositoryManager
+import com.intellij.ide.BrowserUtil
+import com.intellij.notification.NotificationAction
 import com.intellij.notification.NotificationListener
+import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.application.invokeAndWaitIfNeeded
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.progress.ProgressIndicator
@@ -33,9 +37,12 @@ import com.intellij.space.notification.SpaceNotificationIdsHolder.Companion.PROJ
 import com.intellij.space.notification.SpaceNotificationIdsHolder.Companion.SHARING_NOT_FINISHED
 import com.intellij.space.settings.CloneType
 import com.intellij.space.settings.SpaceSettings
+import com.intellij.space.stats.SpaceStatsCounterCollector
+import com.intellij.space.utils.SpaceUrls
 import com.intellij.space.vcs.SpaceHttpPasswordState
 import com.intellij.space.vcs.SpaceProjectContext
 import com.intellij.space.vcs.SpaceSetGitHttpPasswordDialog
+import com.intellij.util.Consumer
 import com.intellij.util.containers.ContainerUtil
 import com.intellij.vcsUtil.VcsFileUtil
 import com.intellij.xml.util.XmlStringUtil.formatLink
@@ -48,16 +55,18 @@ import git4idea.commands.GitLineHandler
 import git4idea.i18n.GitBundle
 import git4idea.repo.GitRepository
 import git4idea.util.GitFileUtils
-import libraries.coroutines.extra.Lifetime
-import libraries.coroutines.extra.launch
-import libraries.klogging.KLogger
+import libraries.coroutines.extra.runBlocking
+import libraries.coroutines.extra.using
 import libraries.klogging.logger
 import runtime.Ui
 
-class SpaceShareProjectAction : DumbAwareAction() {
-  private val log: KLogger = logger<SpaceShareProjectAction>()
+private class SpaceShareProjectAction : DumbAwareAction() {
+  companion object {
+    private val LOG = logger<SpaceShareProjectAction>()
+  }
 
   private val git: Git = Git.getInstance()
+
 
   override fun update(e: AnActionEvent) {
     SpaceActionUtils.showIconInActionSearch(e)
@@ -68,7 +77,7 @@ class SpaceShareProjectAction : DumbAwareAction() {
     }
 
     val context = SpaceProjectContext.getInstance(project)
-    if (context.context.value.isAssociatedWithSpaceRepository) {
+    if (context.currentContext.isAssociatedWithSpaceRepository) {
       e.presentation.isEnabledAndVisible = false
       return
     }
@@ -81,25 +90,29 @@ class SpaceShareProjectAction : DumbAwareAction() {
     if (project == null || project.isDefault || project.isDisposed) {
       return
     }
-    launch(Lifetime.Eternal, Ui) {
-      // check that http password set before start sharing process
-      if (SpaceSettings.getInstance().cloneType == CloneType.HTTP) {
-        if (checkAndSetGitHttpPassword() is SpaceHttpPasswordState.Set) {
-          shareProject(project, file)
+
+    SpaceStatsCounterCollector.OPEN_SHARE_PROJECT.log(
+      SpaceStatsCounterCollector.LoginState.convert(SpaceWorkspaceComponent.getInstance().loginState.value)
+    )
+    ApplicationManager.getApplication().invokeLater(
+      {
+        FileDocumentManager.getInstance().saveAllDocuments()
+        SpaceWorkspaceComponent.getInstance().lifetime.using { lt ->
+          when (val creationResult = createSpaceProject(project)) {
+            is SpaceShareProjectDialog.Result.ProjectCreated -> shareProjectOnSpace(project, file, creationResult)
+
+            SpaceShareProjectDialog.Result.NotCreated -> {
+              notifyError(project, SpaceBundle.message("share.project.error.notification.repository.not.created"))
+            }
+          }
         }
-      }
-      else {
-        shareProject(project, file)
-      }
-    }
+      },
+      ModalityState.NON_MODAL
+    )
   }
 
-  private fun shareProject(project: Project, file: VirtualFile?) {
-    FileDocumentManager.getInstance().saveAllDocuments()
-
-    // create project and repository on Space
-    val result = createSpaceProject(project) ?: return
-    val (repoInfo, repoDetails, url) = result
+  private fun shareProjectOnSpace(project: Project, file: VirtualFile?, details: SpaceShareProjectDialog.Result.ProjectCreated) {
+    val (repoInfo, repoDetails, url) = details
 
     object : Task.Backgroundable(project, SpaceBundle.message("share.project.action.progress.title.sharing.title")) {
       override fun run(indicator: ProgressIndicator) {
@@ -110,15 +123,15 @@ class SpaceShareProjectAction : DumbAwareAction() {
         else {
           VcsRepositoryManager.getInstance(project).getRepositoryForFile(project.baseDir, false)
         }
-        log.info("Found repository: $repository")
+        LOG.info("Found repository: $repository")
         val root = repository?.root ?: project.guessProjectDir() ?: return
-        log.info("Found project root: $root")
+        LOG.info("Found project root: $root")
 
         // create repository if needed
         if (repository == null) {
-          log.info { "No git repo detected, creating empty git repository" }
+          LOG.info { "No git repo detected, creating empty git repository" }
           if (!createEmptyGitRepository(project, root, indicator)) {
-            log.error("Unable to init git repository")
+            LOG.error("Unable to init git repository")
             return
           }
         }
@@ -132,57 +145,65 @@ class SpaceShareProjectAction : DumbAwareAction() {
 
         // commit
         if (!performFirstCommitIfRequired(project, root, gitRepo, indicator, repoInfo.name, url)) {
-          log.info("Commit not finished")
+          LOG.info("Commit not finished")
           return
         }
 
-        // push
-        if (!pushCurrentBranch(project, gitRepo, remoteName, remoteUrl, repoInfo.name, url, indicator)) {
-          log.info("Push not finished")
-          return
+        val gitAccessExists = SpaceWorkspaceComponent.getInstance().lifetime.using { lt ->
+          runBlocking(lt, Ui) {
+            checkPassword(project)
+          }
         }
 
-        VcsNotifier.getInstance(project).notifySuccess(
-          PROJECT_SHARED_SUCCESSFULLY,
-          SpaceBundle.message("share.project.success.notification.title"),
-          formatLink(url, repoInfo.name), // NON-NLS
-          NotificationListener.URL_OPENING_LISTENER
-        )
+        if (gitAccessExists) {
+          // push
+          if (!pushCurrentBranch(project, gitRepo, remoteName, remoteUrl, repoInfo.name, url, indicator)) {
+            LOG.info("Push not finished")
+            return
+          }
+
+          VcsNotifier.getInstance(project).notifySuccess(
+            PROJECT_SHARED_SUCCESSFULLY,
+            SpaceBundle.message("share.project.success.notification.title"),
+            formatLink(url, repoInfo.name), // NON-NLS
+            NotificationListener.URL_OPENING_LISTENER
+          )
+        }
+        else {
+          val notification = VcsNotifier.IMPORTANT_ERROR_NOTIFICATION.createNotification(
+            SpaceBundle.message("share.project.error.notification.title"),
+            SpaceBundle.message("share.project.error.notification.not.pushed.git.access", formatLink(url, repoInfo.name)), // NON-NLS
+            NotificationType.ERROR,
+            NotificationListener.URL_OPENING_LISTENER,
+            SHARING_NOT_FINISHED
+          )
+          val workspace = SpaceWorkspaceComponent.getInstance().workspace.value
+          if (workspace != null) {
+            notification.addAction(
+              NotificationAction.create(SpaceBundle.message("share.project.error.notification.action.configure.text"), Consumer {
+                val gitAccessConfigurationPageUrl = SpaceUrls.git(workspace.me.value.username)
+                BrowserUtil.browse(gitAccessConfigurationPageUrl)
+              }))
+          }
+          VcsNotifier.getInstance(project).notify(notification)
+        }
       }
     }.queue()
   }
 
-  private suspend fun checkAndSetGitHttpPassword(): SpaceHttpPasswordState {
-    val space = SpaceWorkspaceComponent.getInstance()
-    val client = space.workspace.value?.client ?: return SpaceHttpPasswordState.NotSet
-    val me = space.workspace.value?.me?.value ?: return SpaceHttpPasswordState.NotSet
-    val td = client.td
-    val gitHttpPassword = client.api.vcsPasswords().getVcsPassword(me.identifier)
-    if (gitHttpPassword == null) {
-      val passwordDialog = SpaceSetGitHttpPasswordDialog(me, client)
-      if (passwordDialog.showAndGet() && passwordDialog.result is SpaceHttpPasswordState.Set) {
-        return passwordDialog.result
-      }
-      return SpaceHttpPasswordState.NotSet
-    }
-    else {
-      return SpaceHttpPasswordState.Set(gitHttpPassword)
-    }
-  }
-
-  private fun createSpaceProject(project: Project): SpaceShareProjectDialog.Result? {
-    log.info("Creating repository on Space")
+  private fun createSpaceProject(project: Project): SpaceShareProjectDialog.Result {
+    LOG.info("Creating repository on Space")
     val shareProjectDialog = SpaceShareProjectDialog(project)
     if (shareProjectDialog.showAndGet()) {
       val result = shareProjectDialog.result
       if (result == null) {
-        log.info("Repository not created")
-        return null
+        LOG.info("Repository not created")
+        return SpaceShareProjectDialog.Result.NotCreated
       }
-      log.info("Repository created successfully: $result")
+      LOG.info("Repository created successfully: $result")
       return result
     }
-    return null
+    return SpaceShareProjectDialog.Result.Canceled
   }
 
   private fun createEmptyGitRepository(project: Project, root: VirtualFile, indicator: ProgressIndicator): Boolean {
@@ -192,7 +213,7 @@ class SpaceShareProjectAction : DumbAwareAction() {
       VcsNotifier.getInstance(project).notifyError(GIT_REPO_INIT_ERROR,
                                                    GitBundle.message("initializing.title"),
                                                    result.errorOutputAsHtmlString)
-      log.info { "Failed to create empty git repo: " + result.errorOutputAsJoinedString }
+      LOG.info { "Failed to create empty git repo: " + result.errorOutputAsJoinedString }
       return false
     }
     GitInit.refreshAndConfigureVcsMappings(project, root, root.path)
@@ -202,18 +223,18 @@ class SpaceShareProjectAction : DumbAwareAction() {
 
   private fun addRemoteUrl(repoDetails: RepoDetails, git: Git, gitRepo: GitRepository, indicator: ProgressIndicator): Pair<String, String> {
     val remoteUrl = when (SpaceSettings.getInstance().cloneType) {
-      CloneType.HTTP -> repoDetails.urls.httpUrl
+      CloneType.HTTPS -> repoDetails.urls.httpUrl
       CloneType.SSH -> repoDetails.urls.sshUrl
     } as String
 
-    val remoteName = "origin"
+    val remoteName = "space"
     indicator.text = SpaceBundle.message("share.project.action.progress.title.adding.remote.title")
     val commandResult = git.addRemote(gitRepo, remoteName, remoteUrl)
     if (commandResult.success()) {
       gitRepo.update()
     }
     else {
-      log.error {
+      LOG.error {
         commandResult.errorOutputAsJoinedString
       }
     }
@@ -231,7 +252,7 @@ class SpaceShareProjectAction : DumbAwareAction() {
     }
 
     try {
-      log.info("Adding files for commit")
+      LOG.info("Adding files for commit")
       indicator.text = SpaceBundle.message("share.project.action.progress.title.adding.files.title")
 
       // ask for files to add
@@ -255,7 +276,7 @@ class SpaceShareProjectAction : DumbAwareAction() {
       GitFileUtils.deleteFilesFromCache(project, root, filesToDelete)
 
       // commit
-      log.info("Performing commit")
+      LOG.info("Performing commit")
       indicator.text = SpaceBundle.message("share.project.action.progress.title.committing.title")
       val handler = GitLineHandler(project, root, GitCommand.COMMIT)
       handler.setStdoutSuppressed(false)
@@ -266,7 +287,7 @@ class SpaceShareProjectAction : DumbAwareAction() {
       VcsFileUtil.markFilesDirty(project, affectedFiles)
     }
     catch (e: VcsException) {
-      log.warn(e)
+      LOG.warn(e)
       val repositoryLink = formatLink(url, "'$name'") // NON-NLS
       notifyError(project, wrapInHtmlLines( // NON-NLS
         SpaceBundle.message("share.project.error.notification.initial.commit.failed.message", repositoryLink),
@@ -275,7 +296,7 @@ class SpaceShareProjectAction : DumbAwareAction() {
       return false
     }
 
-    log.info("Successfully created initial commit")
+    LOG.info("Successfully created initial commit")
     return true
   }
 
@@ -306,7 +327,7 @@ class SpaceShareProjectAction : DumbAwareAction() {
                                 name: String,
                                 url: String,
                                 indicator: ProgressIndicator): Boolean {
-    log.info("Pushing to master")
+    LOG.info("Pushing to master")
     indicator.text = SpaceBundle.message("share.project.action.progress.title.pushing.title")
 
     val currentBranch = repository.currentBranch
@@ -334,5 +355,42 @@ class SpaceShareProjectAction : DumbAwareAction() {
       NotificationListener.URL_OPENING_LISTENER
     )
   }
+
+  private suspend fun checkPassword(project: Project): Boolean {
+    return when (SpaceSettings.getInstance().cloneType) {
+      CloneType.HTTPS -> {
+        checkAndSetGitHttpPassword(project) is SpaceHttpPasswordState.Set
+      }
+      CloneType.SSH -> false
+    }
+  }
+
+  private suspend fun checkAndSetGitHttpPassword(project: Project): SpaceHttpPasswordState {
+    val space = SpaceWorkspaceComponent.getInstance()
+    val workspace = space.workspace.value ?: return SpaceHttpPasswordState.NotSet
+    val client = workspace.client
+    val me = workspace.me.value
+
+    try {
+      val gitHttpPassword = client.api.vcsPasswords().getVcsPassword(me.identifier)
+
+      if (gitHttpPassword == null) {
+        val passwordDialog = SpaceSetGitHttpPasswordDialog(me, client)
+        if (passwordDialog.showAndGet() && passwordDialog.result is SpaceHttpPasswordState.Set) {
+          return passwordDialog.result
+        }
+        return SpaceHttpPasswordState.NotSet
+      }
+      else {
+        return SpaceHttpPasswordState.Set(gitHttpPassword)
+      }
+    }
+    catch (e: Exception) {
+      LOG.error(e, "Unable to check git https password")
+      notifyError(project, SpaceBundle.message("share.project.error.unable.to.check.git.https.password"))
+    }
+    return SpaceHttpPasswordState.NotSet
+  }
+
 }
 

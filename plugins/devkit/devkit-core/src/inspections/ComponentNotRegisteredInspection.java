@@ -2,6 +2,7 @@
 package org.jetbrains.idea.devkit.inspections;
 
 import com.intellij.codeInspection.LocalQuickFix;
+import com.intellij.codeInspection.ui.InspectionOptionsPanel;
 import com.intellij.lang.jvm.DefaultJvmElementVisitor;
 import com.intellij.lang.jvm.JvmClass;
 import com.intellij.lang.jvm.JvmElementVisitor;
@@ -50,8 +51,7 @@ public class ComponentNotRegisteredInspection extends DevKitJvmInspection {
   @Override
   @Nullable
   public JComponent createOptionsPanel() {
-    JPanel jPanel = new JPanel();
-    jPanel.setLayout(new BoxLayout(jPanel, BoxLayout.Y_AXIS));
+    final InspectionOptionsPanel panel = new InspectionOptionsPanel();
 
     final JCheckBox ignoreNonPublic = new JCheckBox(
       DevKitBundle.message("inspections.component.not.registered.option.ignore.non.public"),
@@ -75,15 +75,15 @@ public class ComponentNotRegisteredInspection extends DevKitJvmInspection {
       }
     });
 
-    jPanel.add(checkJavaActions);
-    jPanel.add(ignoreNonPublic);
-    return jPanel;
+    panel.add(checkJavaActions);
+    panel.add(ignoreNonPublic);
+    return panel;
   }
 
   @Nullable
   @Override
   protected JvmElementVisitor<Boolean> buildVisitor(@NotNull Project project, @NotNull HighlightSink sink, boolean isOnTheFly) {
-    return new DefaultJvmElementVisitor<Boolean>() {
+    return new DefaultJvmElementVisitor<>() {
       @Override
       public Boolean visitClass(@NotNull JvmClass clazz) {
         PsiElement sourceElement = clazz.getSourceElement();

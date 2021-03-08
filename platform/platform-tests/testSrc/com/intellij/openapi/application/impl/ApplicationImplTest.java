@@ -9,6 +9,7 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.*;
 import com.intellij.openapi.application.ex.ApplicationManagerEx;
 import com.intellij.openapi.application.ex.ApplicationUtil;
+import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
@@ -25,11 +26,10 @@ import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.concurrency.Semaphore;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.UIUtil;
-import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
-import org.junit.Assert;
 
 import javax.swing.*;
+import java.io.IOException;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -40,8 +40,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static com.intellij.util.TestTimeOut.setTimeout;
-import static org.hamcrest.CoreMatchers.containsString;
-import static org.hamcrest.core.IsNot.not;
 
 @RunFirst
 public class ApplicationImplTest extends LightPlatformTestCase {
@@ -677,30 +675,8 @@ public class ApplicationImplTest extends LightPlatformTestCase {
     if (exception != null) throw exception;
   }
 
-  public void testPluginsHostProperty() {
-    String host = "IntellijIdeaRulezzz";
-
-    String oldHost = System.setProperty(ApplicationInfoImpl.IDEA_PLUGINS_HOST_PROPERTY, host);
-
-    try {
-      ApplicationInfoImpl applicationInfo = new ApplicationInfoImpl(new Element("state"));
-      Assert.assertThat(applicationInfo.getPluginManagerUrl(), containsString(host));
-      Assert.assertThat(applicationInfo.getPluginsListUrl(), containsString(host));
-      Assert.assertThat(applicationInfo.getPluginsDownloadUrl(), containsString(host));
-      Assert.assertThat(applicationInfo.getChannelsListUrl(), containsString(host));
-
-      Assert.assertThat(applicationInfo.getPluginManagerUrl(), not(containsString(ApplicationInfoImpl.DEFAULT_PLUGINS_HOST)));
-      Assert.assertThat(applicationInfo.getPluginsListUrl(), not(containsString(ApplicationInfoImpl.DEFAULT_PLUGINS_HOST)));
-      Assert.assertThat(applicationInfo.getPluginsDownloadUrl(), not(containsString(ApplicationInfoImpl.DEFAULT_PLUGINS_HOST)));
-      Assert.assertThat(applicationInfo.getChannelsListUrl(), not(containsString(ApplicationInfoImpl.DEFAULT_PLUGINS_HOST)));
-    }
-    finally {
-      if (oldHost == null) {
-        System.clearProperty(ApplicationInfoImpl.IDEA_PLUGINS_HOST_PROPERTY);
-      }
-      else {
-        System.setProperty(ApplicationInfoImpl.IDEA_PLUGINS_HOST_PROPERTY, oldHost);
-      }
-    }
+  public void testWriteCommandActionMustThrowRelevantException() {
+    assertThrows(IOException.class, () -> WriteCommandAction.runWriteCommandAction(getProject(),
+                                          (ThrowableComputable<ThrowableRunnable<?>, IOException>)() -> { throw new IOException("aaaah"); }));
   }
 }

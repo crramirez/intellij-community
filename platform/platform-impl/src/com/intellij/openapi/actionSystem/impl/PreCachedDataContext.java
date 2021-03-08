@@ -11,6 +11,7 @@ import com.intellij.openapi.actionSystem.DataKey;
 import com.intellij.openapi.actionSystem.DataProvider;
 import com.intellij.openapi.actionSystem.PlatformDataKeys;
 import com.intellij.openapi.application.AccessToken;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.keymap.impl.IdeKeyEventDispatcher;
@@ -22,8 +23,10 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.awt.*;
+import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static com.intellij.ide.impl.DataManagerImpl.getDataProviderEx;
 import static com.intellij.ide.impl.DataManagerImpl.validateEditor;
@@ -43,6 +46,7 @@ class PreCachedDataContext implements DataContext, UserDataHolder {
     if (!(original instanceof DataManagerImpl.MyDataContext)) {
       throw new AssertionError(original.getClass().getName());
     }
+    ApplicationManager.getApplication().assertIsDispatchThread();
     Component component = original.getData(PlatformDataKeys.CONTEXT_COMPONENT);
 
     try (AccessToken ignored = ProhibitAWTEvents.start("getData")) {
@@ -61,7 +65,7 @@ class PreCachedDataContext implements DataContext, UserDataHolder {
         return;
       }
 
-      myCachedData = ContainerUtil.createConcurrentWeakValueMap();
+      myCachedData = new ConcurrentHashMap<>();
 
       preGetAllData(component, myCachedData);
 
@@ -74,30 +78,34 @@ class PreCachedDataContext implements DataContext, UserDataHolder {
   @Override
   public Object getData(@NotNull String dataId) {
     ProgressManager.checkCanceled();
-
     Object answer = myCachedData.get(dataId);
-    if (answer != null) {
-      if (answer == NullResult.Initial) answer = null;
-      else return answer == NullResult.Final ? null : answer;
+    if (answer != null && answer != NullResult.Initial) {
+      return answer == NullResult.Final ? null : answer;
     }
 
     DataManagerImpl dataManager = (DataManagerImpl)DataManager.getInstance();
     GetDataRule rule = dataManager.getDataRule(dataId);
-    if (rule != null) {
-      answer = dataManager.getDataFromProvider(id -> {
-        Object o = myCachedData.get(id);
-        return o == NullResult.Initial || o == NullResult.Final ? null : o;
-      }, dataId, null, rule);
-    }
+    answer = rule == null ? null : dataManager.getDataFromProvider(dataId2 -> {
+      Object o = myCachedData.get(dataId2);
+      return o == NullResult.Initial || o == NullResult.Final ? null : o;
+    }, dataId, null, rule);
 
-    myCachedData.put(dataId, answer == null ? NullResult.Final : answer);
+    myCachedData.put(dataId, answer == null || answer == NullResult.Initial ? NullResult.Final : answer);
     return answer;
   }
 
   private static void preGetAllData(@NotNull Component component, @NotNull Map<String, Object> cachedData) {
     long start = System.currentTimeMillis();
-
     DataManagerImpl dataManager = (DataManagerImpl)DataManager.getInstance();
+
+    ArrayList<Object> slowProviders = new ArrayList<>();
+    cachedData.put(PlatformDataKeys.CONTEXT_COMPONENT.getName(), component);
+    cachedData.put(PlatformDataKeys.MODALITY_STATE.getName(), ModalityState.stateForComponent(component));
+    cachedData.put(PlatformDataKeys.IS_MODAL_CONTEXT.getName(), IdeKeyEventDispatcher.isModalContext(component));
+    cachedData.put(PlatformDataKeys.SLOW_DATA_PROVIDERS.getName(), slowProviders);
+
+    // ignore injected data keys, injections are slow,
+    // and slow parts must be in a slow provider anyway
     DataKey<?>[] keys = DataKey.allKeys();
     BitSet computed = new BitSet(keys.length);
     for (Component c = component; c != null; c = c.getParent()) {
@@ -105,20 +113,24 @@ class PreCachedDataContext implements DataContext, UserDataHolder {
       if (dataProvider == null) continue;
       for (int i = 0; i < keys.length; i++) {
         DataKey<?> key = keys[i];
-        if (computed.get(i)) continue;
-
-        Object data = key == PlatformDataKeys.IS_MODAL_CONTEXT ? IdeKeyEventDispatcher.isModalContext(c) :
-                      key == PlatformDataKeys.CONTEXT_COMPONENT ? c :
-                      key == PlatformDataKeys.MODALITY_STATE ? ModalityState.stateForComponent(c) :
-                      dataManager.getDataFromProvider(dataProvider, key.getName(), null, null);
-        if (data instanceof Editor) {
-          data = validateEditor((Editor)data, c);
+        boolean alreadyComputed = computed.get(i);
+        if (key == PlatformDataKeys.IS_MODAL_CONTEXT ||
+            key == PlatformDataKeys.CONTEXT_COMPONENT ||
+            key == PlatformDataKeys.MODALITY_STATE) {
+          if (!alreadyComputed) computed.set(i, true);
+          continue;
         }
+        Object data = !alreadyComputed || key == PlatformDataKeys.SLOW_DATA_PROVIDERS ?
+                      dataManager.getDataFromProvider(dataProvider, key.getName(), null, null) : null;
+        if (data instanceof Editor) data = validateEditor((Editor)data, component);
+        if (data == null) continue;
 
-        if (data != null) {
-          computed.set(i, true);
-          cachedData.put(key.getName(), data);
+        computed.set(i, true);
+        if (key == PlatformDataKeys.SLOW_DATA_PROVIDERS) {
+          ContainerUtil.addAll(slowProviders, (Iterable<?>)data);
+          continue;
         }
+        cachedData.put(key.getName(), data);
       }
     }
     for (int i = 0; i < keys.length; i++) {
@@ -129,7 +141,7 @@ class PreCachedDataContext implements DataContext, UserDataHolder {
     }
     long time = System.currentTimeMillis() - start;
     if (time > 200) {
-      // todo convert all slow keys to DataRules
+      // nothing
     }
   }
 

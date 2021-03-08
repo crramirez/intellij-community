@@ -1,5 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
-
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.psi.impl.source.codeStyle;
 
 import com.intellij.CodeStyleBundle;
@@ -12,7 +11,7 @@ import com.intellij.lang.*;
 import com.intellij.lang.injection.InjectedLanguageManager;
 import com.intellij.model.ModelBranch;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.command.CommandProcessor;
+import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.diagnostic.Attachment;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.diagnostic.RuntimeExceptionWithAttachments;
@@ -89,6 +88,10 @@ public class CodeStyleManagerImpl extends CodeStyleManager implements Formatting
 
     ASTNode treeElement = element.getNode();
     final PsiFile file = element.getContainingFile();
+
+    if (file == null)
+      return element;
+
     if (ExternalFormatProcessor.useExternalFormatter(file)) {
       return ExternalFormatProcessor.formatElement(element, element.getTextRange(), canChangeWhiteSpacesOnly);
     }
@@ -169,7 +172,7 @@ public class CodeStyleManagerImpl extends CodeStyleManager implements Formatting
   }
 
   @Override
-  public void reformatText(@NotNull PsiFile file, @NotNull Collection<TextRange> ranges) throws IncorrectOperationException {
+  public void reformatText(@NotNull PsiFile file, @NotNull Collection<? extends TextRange> ranges) throws IncorrectOperationException {
     reformatText(file, ranges, null);
   }
 
@@ -223,13 +226,7 @@ public class CodeStyleManagerImpl extends CodeStyleManager implements Formatting
       removeEndingWhiteSpaceFromEachRange(file, ranges);
     }
 
-    formatRanges(file, ranges,
-                 ExternalFormatProcessor.useExternalFormatter(file)
-                 ? null  // do nothing, delegate the external formatting activity to post-processor
-                 : () -> {
-                   final CodeFormatterFacade codeFormatter = new CodeFormatterFacade(getSettings(file), file.getLanguage());
-                   codeFormatter.processText(file, ranges, true);
-                 });
+    formatRanges(file, ranges);
 
     if (caretKeeper != null) {
       caretKeeper.restoreCaretPosition();
@@ -244,9 +241,7 @@ public class CodeStyleManagerImpl extends CodeStyleManager implements Formatting
     }
   }
 
-  public static void formatRanges(@NotNull PsiFile file,
-                                  @NotNull FormatTextRanges ranges,
-                                  @Nullable Runnable formatAction) {
+  public static void formatRanges(@NotNull PsiFile file, @NotNull FormatTextRanges ranges) {
     final SmartPointerManager smartPointerManager = SmartPointerManager.getInstance(file.getProject());
 
     List<RangeFormatInfo> infos = new ArrayList<>();
@@ -269,16 +264,23 @@ public class CodeStyleManagerImpl extends CodeStyleManager implements Formatting
       ));
     }
 
-    if (formatAction != null) {
-      formatAction.run();
+    if (!ExternalFormatProcessor.useExternalFormatter(file)) {
+      final CodeFormatterFacade codeFormatter = new CodeFormatterFacade(getSettings(file), file.getLanguage());
+      codeFormatter.processText(file, ranges, true);
     }
 
     for (RangeFormatInfo info : infos) {
       final PsiElement startElement = info.startPointer == null ? null : info.startPointer.getElement();
       final PsiElement endElement = info.endPointer == null ? null : info.endPointer.getElement();
       if ((startElement != null || info.fromStart) && (endElement != null || info.toEnd)) {
-        postProcessText(file, new TextRange(info.fromStart ? 0 : startElement.getTextRange().getStartOffset(),
-                                            info.toEnd ? file.getTextLength() : endElement.getTextRange().getEndOffset()));
+        TextRange currRange = new TextRange(info.fromStart ? 0 : startElement.getTextRange().getStartOffset(),
+                      info.toEnd ? file.getTextLength() : endElement.getTextRange().getEndOffset());
+        if (ExternalFormatProcessor.useExternalFormatter(file)) {
+          ExternalFormatProcessor.formatRangeInFile(file, currRange, false, false);
+        }
+        else {
+          postProcessText(file, currRange);
+        }
       }
       if (info.startPointer != null) smartPointerManager.removePointer(info.startPointer);
       if (info.endPointer != null) smartPointerManager.removePointer(info.endPointer);
@@ -419,7 +421,7 @@ public class CodeStyleManagerImpl extends CodeStyleManager implements Formatting
 
   @Override
   public void adjustLineIndent(@NotNull PsiFile file, TextRange rangeToAdjust) throws IncorrectOperationException {
-    new CodeStyleManagerRunnable<Object>(this, FormattingMode.ADJUST_INDENT) {
+    new CodeStyleManagerRunnable<>(this, FormattingMode.ADJUST_INDENT) {
       @Override
       protected Object doPerform(int offset, TextRange range) {
         FormatterEx.getInstanceEx().adjustLineIndentsForRange(myModel, mySettings, myIndentOptions, range);
@@ -749,10 +751,8 @@ public class CodeStyleManagerImpl extends CodeStyleManager implements Formatting
 
   @Override
   public <T> T performActionWithFormatterDisabled(final Computable<T> r) {
-    return ((FormatterImpl)FormatterEx.getInstance()).runWithFormattingDisabled(() -> {
-      final PostprocessReformattingAspect component = PostprocessReformattingAspect.getInstance(getProject());
-      return component.disablePostprocessFormattingInside(r);
-    });
+    final PostprocessReformattingAspect component = PostprocessReformattingAspect.getInstance(getProject());
+    return component.disablePostprocessFormattingInside(r);
   }
 
   private static class RangeFormatInfo{
@@ -980,13 +980,20 @@ public class CodeStyleManagerImpl extends CodeStyleManager implements Formatting
       return;
     }
 
+    final Runnable commandRunnable = () -> WriteCommandAction.runWriteCommandAction(
+      myProject, CodeStyleBundle.message("command.name.reformat"), null, () -> commitAndFormat(file), file);
+
     CodeStyleCachingService.getInstance(myProject).scheduleWhenSettingsComputed(
       file,
-      () -> CommandProcessor.getInstance().executeCommand(
-        myProject,
-        () -> ApplicationManager.getApplication().runWriteAction(() -> commitAndFormat(file)),
-        CodeStyleBundle.message("command.name.reformat"), null
-      )
+      () -> {
+        //noinspection SSBasedInspection
+        if (ApplicationManager.getApplication().isUnitTestMode()) {
+          commandRunnable.run();
+        }
+        else {
+          ApplicationManager.getApplication().invokeLater(commandRunnable);
+        }
+      }
     );
   }
 

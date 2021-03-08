@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.find.findUsages;
 
 import com.intellij.codeInsight.hint.HintManager;
@@ -91,6 +91,7 @@ public final class FindUsagesManager {
    * @deprecated Use {@link #FindUsagesManager(Project)}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public FindUsagesManager(@NotNull Project project, @SuppressWarnings("unused") UsageViewManager anotherManager) {
     DeprecatedMethodException.report("Please use FindUsagesManager(Project) instead");
     myProject = project;
@@ -299,8 +300,8 @@ public final class FindUsagesManager {
                                                   PsiElement @NotNull [] primaryElements,
                                                   PsiElement @NotNull [] secondaryElements, @NotNull FindUsagesOptions findUsagesOptions) {
     return ReadAction.compute(() -> {
-      PsiElement2UsageTargetAdapter[] primaryTargets = PsiElement2UsageTargetAdapter.convert(primaryElements);
-      PsiElement2UsageTargetAdapter[] secondaryTargets = PsiElement2UsageTargetAdapter.convert(secondaryElements);
+      PsiElement2UsageTargetAdapter[] primaryTargets = PsiElement2UsageTargetAdapter.convert(primaryElements, false);
+      PsiElement2UsageTargetAdapter[] secondaryTargets = PsiElement2UsageTargetAdapter.convert(secondaryElements, false);
       return createUsageSearcher(primaryTargets, secondaryTargets, handler, findUsagesOptions, null);
     });
   }
@@ -366,11 +367,15 @@ public final class FindUsagesManager {
 
     FindUsagesOptions optionsClone = options.clone();
     return processor -> {
+      Project project = ReadAction.compute(() -> scopeFile != null ? scopeFile.getProject() : primaryTargets[0].getProject());
+      ProgressIndicator indicator = ProgressManager.getInstance().getProgressIndicator();
+
+      runUpdate(primaryTargets, indicator);
+      runUpdate(secondaryTargets, indicator);
+
       PsiElement[] primaryElements = ReadAction.compute(() -> PsiElement2UsageTargetAdapter.convertToPsiElements(primaryTargets));
       PsiElement[] secondaryElements = ReadAction.compute(() -> PsiElement2UsageTargetAdapter.convertToPsiElements(secondaryTargets));
 
-      Project project = ReadAction.compute(() -> scopeFile != null ? scopeFile.getProject() : primaryTargets[0].getProject());
-      ProgressIndicator indicator = ProgressManager.getInstance().getProgressIndicator();
       LOG.assertTrue(indicator != null, "Must run under progress. see ProgressManager.run*");
 
       ((PsiManagerImpl)PsiManager.getInstance(project)).dropResolveCacheRegularly(indicator);
@@ -427,6 +432,13 @@ public final class FindUsagesManager {
     };
   }
 
+  private static void runUpdate(PsiElement2UsageTargetAdapter @NotNull [] targets, @NotNull ProgressIndicator indicator) {
+    for (PsiElement2UsageTargetAdapter target : targets) {
+      indicator.checkCanceled();
+      ReadAction.run(() -> target.update());
+    }
+  }
+
   private static PsiElement2UsageTargetAdapter @NotNull [] convertToUsageTargets(@NotNull Iterable<? extends PsiElement> elementsToSearch,
                                                                                  @NotNull FindUsagesOptions findUsagesOptions) {
     List<PsiElement2UsageTargetAdapter> targets = ContainerUtil.map(elementsToSearch,
@@ -467,7 +479,7 @@ public final class FindUsagesManager {
   private static UsageViewPresentation createPresentation(@NotNull PsiElement psiElement,
                                                           @NotNull FindUsagesOptions options,
                                                           boolean toOpenInNewTab) {
-    String usagesString = generateUsagesString(options);
+    String usagesString = options.generateUsagesString();
     String longName = UsageViewUtil.getLongName(psiElement);
     UsageViewPresentation presentation = new UsageViewPresentation();
     String scopeString = options.searchScope.getDisplayName();
@@ -492,8 +504,8 @@ public final class FindUsagesManager {
 
     clearStatusBar();
 
-    PsiElement2UsageTargetAdapter[] primaryTargets = PsiElement2UsageTargetAdapter.convert(primaryElements);
-    PsiElement2UsageTargetAdapter[] secondaryTargets = PsiElement2UsageTargetAdapter.convert(primaryElements);
+    PsiElement2UsageTargetAdapter[] primaryTargets = PsiElement2UsageTargetAdapter.convert(primaryElements, false);
+    PsiElement2UsageTargetAdapter[] secondaryTargets = PsiElement2UsageTargetAdapter.convert(primaryElements, false);
     UsageSearcher usageSearcher = createUsageSearcher(primaryTargets, secondaryTargets, handler, findUsagesOptions, scopeFile);
     AtomicBoolean usagesWereFound = new AtomicBoolean();
 
@@ -627,14 +639,9 @@ public final class FindUsagesManager {
   private static PsiElement2UsageTargetAdapter convertToUsageTarget(@NotNull PsiElement elementToSearch,
                                                                     @NotNull FindUsagesOptions findUsagesOptions) {
     if (elementToSearch instanceof NavigationItem) {
-      return new PsiElement2UsageTargetAdapter(elementToSearch,findUsagesOptions);
+      return new PsiElement2UsageTargetAdapter(elementToSearch, findUsagesOptions, false);
     }
     throw new IllegalArgumentException("Wrong usage target:" + elementToSearch + "; " + elementToSearch.getClass());
-  }
-
-  @NotNull
-  private static String generateUsagesString(@NotNull FindUsagesOptions selectedOptions) {
-    return selectedOptions.generateUsagesString();
   }
 
   private static void showEditorHint(@NotNull @NlsContexts.HintText String message, @NotNull Editor editor) {

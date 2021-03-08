@@ -1,7 +1,7 @@
-// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.internal.statistic.actions
 
-import com.intellij.internal.statistic.eventLog.getEventLogProviders
+import com.intellij.internal.statistic.StatisticsDevKitUtil.getLogProvidersInTestMode
 import com.intellij.internal.statistic.eventLog.validator.storage.persistence.BaseEventLogMetadataPersistence.getDefaultMetadataFile
 import com.intellij.internal.statistic.eventLog.validator.storage.persistence.EventLogMetadataPersistence.EVENTS_SCHEME_FILE
 import com.intellij.internal.statistic.eventLog.validator.storage.persistence.EventLogMetadataSettingsPersistence
@@ -25,7 +25,7 @@ class EventsSchemeConfigurationModel {
   private var currentSettings: EventsSchemePathSettings? = null
 
   init {
-    getEventLogProviders().forEach { provider ->
+    getLogProvidersInTestMode().forEach { provider ->
       val recorderId = provider.recorderId
       recorderComboBox.addItem(recorderId)
     }
@@ -78,6 +78,11 @@ class EventsSchemeConfigurationModel {
     updatePathField()
   }
 
+  fun reset(recorderId: String): EventsSchemeConfigurationModel {
+    recorderComboBox.selectedItem = recorderId
+    return this
+  }
+
   fun validate(): ValidationInfo? {
     val currentPathSettings = currentSettings ?: return null
     val currentValidationInfo = validatePath(currentPathSettings)
@@ -112,7 +117,7 @@ class EventsSchemeConfigurationModel {
   }
 
   class EventsSchemePathSettings(recorderId: String) {
-    private val defaultPath: String = getDefaultMetadataFile(recorderId, EVENTS_SCHEME_FILE, null).absolutePath
+    private val defaultPath = getDefaultMetadataFile(recorderId, EVENTS_SCHEME_FILE, null).toString()
     var customPath: String? = null
     var useCustomPath = false
 
@@ -135,5 +140,4 @@ class EventsSchemeConfigurationModel {
         }
       }
   }
-
 }

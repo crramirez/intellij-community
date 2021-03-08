@@ -68,43 +68,9 @@ public class VcsUtil {
     return (int)Math.min(result, Integer.MAX_VALUE);
   }
 
-  /**
-   * @deprecated use the {@link VcsDirtyScopeManager} directly.
-   */
-  @Deprecated
-  public static void markFileAsDirty(final Project project, final VirtualFile file) {
-    VcsDirtyScopeManager.getInstance(project).fileDirty(file);
-  }
-
-  /**
-   * @deprecated use the {@link VcsDirtyScopeManager} directly.
-   */
-  @Deprecated
-  public static void markFileAsDirty(final Project project, @NonNls FilePath path) {
-    VcsDirtyScopeManager.getInstance(project).fileDirty(path);
-  }
-
   public static void markFileAsDirty(final Project project, @NonNls String path) {
     final FilePath filePath = VcsContextFactory.SERVICE.getInstance().createFilePathOn(new File(path));
     VcsDirtyScopeManager.getInstance(project).fileDirty(filePath);
-  }
-
-  /**
-   * @deprecated use the {@link VcsDirtyScopeManager} directly.
-   */
-  @Deprecated
-  public static void refreshFiles(Project project, HashSet<? extends FilePath> paths) {
-    for (FilePath path : paths) {
-      VirtualFile vFile = path.getVirtualFile();
-      if (vFile != null) {
-        if (vFile.isDirectory()) {
-          markFileAsDirty(project, vFile);
-        }
-        else {
-          vFile.refresh(true, vFile.isDirectory());
-        }
-      }
-    }
   }
 
   /**
@@ -258,6 +224,7 @@ public class VcsUtil {
    * @deprecated use {@link #getFilePath(String, boolean)}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static @NotNull FilePath getFilePathForDeletedFile(@NotNull @NonNls String path, boolean isDirectory) {
     return VcsContextFactory.SERVICE.getInstance().createFilePath(path, isDirectory);
   }
@@ -276,6 +243,7 @@ public class VcsUtil {
    * @deprecated use {@link StatusBar.Info#set(String, Project)} directly.
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static void showStatusMessage(@NotNull Project project, @Nullable @Nls String message) {
     SwingUtilities.invokeLater(() -> {
       if (project.isOpen()) {
@@ -368,6 +336,7 @@ public class VcsUtil {
    * and other run methods from the ProgressManager.
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static boolean runVcsProcessWithProgress(@NotNull VcsRunnable runnable,
                                                   @NotNull @NlsContexts.ProgressTitle String progressTitle,
                                                   boolean canBeCanceled,
@@ -404,12 +373,6 @@ public class VcsUtil {
         return computable.convert(indicator);
       }
     });
-  }
-
-  @Deprecated
-  @Nullable
-  public static VirtualFile waitForTheFile(@NotNull @NonNls String path) {
-    return LocalFileSystem.getInstance().refreshAndFindFileByPath(path);
   }
 
   @NonNls
@@ -633,5 +596,16 @@ public class VcsUtil {
       }
     }
     return -1;
+  }
+
+  /**
+   * Helper that allows to avoid potential O(N*M) in {@link AbstractSet#removeAll(Collection)} due to {@code list.contains(c)} calls.
+   */
+  public static <T> boolean removeAllFromSet(@NotNull Set<T> set, @NotNull Collection<? extends T> toRemove) {
+    boolean modified = false;
+    for (T value : toRemove) {
+      modified |= set.remove(value);
+    }
+    return modified;
   }
 }

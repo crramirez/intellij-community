@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.xdebugger.impl;
 
 import com.intellij.execution.configurations.RunConfiguration;
@@ -26,7 +26,6 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.MessageType;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Disposer;
-import com.intellij.openapi.util.registry.Registry;
 import com.intellij.ui.AppUIUtil;
 import com.intellij.util.EventDispatcher;
 import com.intellij.util.SmartList;
@@ -44,7 +43,6 @@ import com.intellij.xdebugger.impl.evaluate.quick.common.ValueLookupManager;
 import com.intellij.xdebugger.impl.frame.XValueMarkers;
 import com.intellij.xdebugger.impl.frame.XWatchesViewImpl;
 import com.intellij.xdebugger.impl.inline.DebuggerInlayListener;
-import com.intellij.xdebugger.impl.inline.XDebuggerInlayUtil;
 import com.intellij.xdebugger.impl.settings.XDebuggerSettingManagerImpl;
 import com.intellij.xdebugger.impl.ui.XDebugSessionData;
 import com.intellij.xdebugger.impl.ui.XDebugSessionTab;
@@ -499,6 +497,7 @@ public final class XDebugSessionImpl implements XDebugSession {
       processAllBreakpoints(!muted, muted);
     }
     myDebuggerManager.getBreakpointManager().getLineBreakpointManager().queueAllBreakpointsUpdate();
+    myDispatcher.getMulticaster().breakpointsMuted(muted);
   }
 
   @Override
@@ -623,10 +622,6 @@ public final class XDebugSessionImpl implements XDebugSession {
       boolean isTopFrame = isTopFrameSelected();
 
       myDebuggerManager.updateExecutionPoint(getCurrentPosition(), !isTopFrame, getPositionIconRenderer(isTopFrame));
-
-      if (Registry.is("debugger.show.values.between.lines")) {
-        XDebuggerInlayUtil.setupValuePlaceholders(this, false);
-      }
     }
   }
 
@@ -719,7 +714,9 @@ public final class XDebugSessionImpl implements XDebugSession {
         BreakpointsUsageCollector.reportBreakpointVerified(breakpoint, delay);
       }
     }
-    myDebuggerManager.getBreakpointManager().getLineBreakpointManager().queueBreakpointUpdate((XLineBreakpointImpl<?>)breakpoint);
+    XBreakpointManagerImpl debuggerManager = myDebuggerManager.getBreakpointManager(); 
+    debuggerManager.getLineBreakpointManager().queueBreakpointUpdate((XLineBreakpointImpl<?>)breakpoint);
+    debuggerManager.fireBreakpointPresentationUpdated(breakpoint, this);
   }
 
   @Override
@@ -938,9 +935,6 @@ public final class XDebugSessionImpl implements XDebugSession {
         }
 
         clearPausedData();
-        if (Registry.is("debugger.show.values.between.lines")) {
-          XDebuggerInlayUtil.setupValuePlaceholders(this, true);
-        }
 
         if (myValueMarkers != null) {
           myValueMarkers.clear();
@@ -1003,7 +997,8 @@ public final class XDebugSessionImpl implements XDebugSession {
         listener.hyperlinkUpdate(event);
       }
     };
-    XDebuggerManagerImpl.NOTIFICATION_GROUP.createNotification("", message, type.toNotificationType(), notificationListener).notify(myProject);
+    XDebuggerManagerImpl.getNotificationGroup()
+      .createNotification("", message, type.toNotificationType(), notificationListener).notify(myProject);
   }
 
   private final class MyBreakpointListener implements XBreakpointListener<XBreakpoint<?>> {

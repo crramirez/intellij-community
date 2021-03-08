@@ -21,7 +21,6 @@ import com.intellij.openapi.editor.ex.util.EditorUtil;
 import com.intellij.openapi.editor.highlighter.EditorHighlighter;
 import com.intellij.openapi.editor.highlighter.EditorHighlighterFactory;
 import com.intellij.openapi.editor.highlighter.HighlighterIterator;
-import com.intellij.openapi.editor.impl.DefaultEditorTextRepresentationHelper;
 import com.intellij.openapi.editor.impl.EditorImpl;
 import com.intellij.openapi.editor.impl.InlayModelImpl;
 import com.intellij.openapi.editor.impl.SoftWrapModelImpl;
@@ -81,7 +80,6 @@ public final class EditorTestUtil {
   };
 
   public static void performTypingAction(Editor editor, char c) {
-    EditorActionManager actionManager = EditorActionManager.getInstance();
     if (c == BACKSPACE_FAKE_CHAR) {
       executeAction(editor, IdeActions.ACTION_EDITOR_BACKSPACE);
     }
@@ -126,11 +124,13 @@ public final class EditorTestUtil {
 
   @NotNull
   private static DataContext createEditorContext(@NotNull Editor editor) {
-    Object hostEditor = editor instanceof EditorWindow ? ((EditorWindow)editor).getDelegate() : editor;
-    Map<String, Object> map = ContainerUtil.newHashMap(Pair.create(CommonDataKeys.HOST_EDITOR.getName(), hostEditor),
-                                                       Pair.createNonNull(CommonDataKeys.EDITOR.getName(), editor));
+    Editor hostEditor = editor instanceof EditorWindow ? ((EditorWindow)editor).getDelegate() : editor;
     DataContext parent = DataManager.getInstance().getDataContext(editor.getContentComponent());
-    return SimpleDataContext.getSimpleContext(map, parent);
+    return SimpleDataContext.builder()
+      .setParent(parent)
+      .add(CommonDataKeys.HOST_EDITOR, hostEditor)
+      .add(CommonDataKeys.EDITOR, editor)
+      .build();
   }
 
   public static void performReferenceCopy(Editor editor) {
@@ -283,12 +283,6 @@ public final class EditorTestUtil {
 
     SoftWrapApplianceManager applianceManager = model.getApplianceManager();
     applianceManager.setWidthProvider(new TestWidthProvider(visibleWidthInPixels));
-    model.setEditorTextRepresentationHelper(new DefaultEditorTextRepresentationHelper(editor) {
-      @Override
-      public int charWidth(int c, int fontType) {
-        return charWidthInPixels;
-      }
-    });
     setEditorVisibleSizeInPixels(editor, visibleWidthInPixels, visibleHeightInPixels);
     applianceManager.registerSoftWrapIfNecessary();
     return !model.getRegisteredSoftWraps().isEmpty();

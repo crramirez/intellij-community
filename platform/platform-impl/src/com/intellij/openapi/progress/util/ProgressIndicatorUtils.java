@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.progress.util;
 
 import com.intellij.codeWithMe.ClientId;
@@ -17,7 +17,6 @@ import com.intellij.openapi.progress.ProgressIndicatorProvider;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.util.Disposer;
-import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.util.ConcurrencyUtil;
 import com.intellij.util.ExceptionUtil;
@@ -51,7 +50,7 @@ public final class ProgressIndicatorUtils {
     ApplicationManager.getApplication().addApplicationListener(new ApplicationListener() {
         @Override
         public void beforeWriteActionStart(@NotNull Object action) {
-          if (progress.isRunning()) {
+          if (!progress.isCanceled()) {
             progress.cancel();
           }
         }
@@ -71,13 +70,14 @@ public final class ProgressIndicatorUtils {
   /**
    * Same as {@link #runInReadActionWithWriteActionPriority(Runnable)}, optionally allowing to pass a {@link ProgressIndicator}
    * instance, which can be used to cancel action externally.
+   * @return true if action executed successfully, false if it was canceled by write action before or during execution
    */
   public static boolean runInReadActionWithWriteActionPriority(@NotNull final Runnable action,
                                                                @Nullable ProgressIndicator progressIndicator) {
-    final Ref<Boolean> result = new Ref<>(Boolean.FALSE);
-    runWithWriteActionPriority(() -> result.set(ApplicationManagerEx.getApplicationEx().tryRunReadAction(action)),
-                               progressIndicator == null ? new ProgressIndicatorBase(false, false) : progressIndicator);
-    return result.get();
+    AtomicBoolean readActionAcquired = new AtomicBoolean();
+    boolean executed = runWithWriteActionPriority(() -> readActionAcquired.set(ApplicationManagerEx.getApplicationEx().tryRunReadAction(action)),
+                                           progressIndicator == null ? new ProgressIndicatorBase(false, false) : progressIndicator);
+    return readActionAcquired.get() && executed;
   }
 
   /**
@@ -99,6 +99,9 @@ public final class ProgressIndicatorUtils {
     return runInReadActionWithWriteActionPriority(action, null);
   }
 
+  /**
+   * @return true if action executed successfully, false if it was canceled by write action before or during execution
+   */
   public static boolean runWithWriteActionPriority(@NotNull Runnable action, @NotNull ProgressIndicator progressIndicator) {
     ApplicationEx application = (ApplicationEx)ApplicationManager.getApplication();
     if (application.isDispatchThread()) {
@@ -150,10 +153,8 @@ public final class ProgressIndicatorUtils {
         cancellation.run();
         return false;
       }
-      else {
-        action.run();
-        return true;
-      }
+      action.run();
+      return true;
     }
     finally {
       ourWACancellations.remove(cancellation);
@@ -168,7 +169,7 @@ public final class ProgressIndicatorUtils {
     };
   }
 
-  private static boolean isWriting(ApplicationEx application) {
+  private static boolean isWriting(@NotNull ApplicationEx application) {
     return application.isWriteActionPending() || application.isWriteActionInProgress();
   }
 
@@ -270,7 +271,7 @@ public final class ProgressIndicatorUtils {
    * Ensure the current EDT activity finishes in case it requires many write actions, with each being delayed a bit
    * by background thread read action (until its first checkCanceled call). Shouldn't be called from under read action.
    */
-  public static void yieldToPendingWriteActions() {
+  public static void yieldToPendingWriteActions(@Nullable ProgressIndicator indicator) {
     Application application = ApplicationManager.getApplication();
     if (application.isReadAccessAllowed()) {
       throw new IllegalStateException("Mustn't be called from within read action");
@@ -280,13 +281,18 @@ public final class ProgressIndicatorUtils {
     }
     Semaphore semaphore = new Semaphore(1);
     application.invokeLater(semaphore::up, ModalityState.any());
-    awaitWithCheckCanceled(semaphore, ProgressIndicatorProvider.getGlobalProgressIndicator());
+    awaitWithCheckCanceled(semaphore, indicator);
+  }
+
+    /** @see ProgressIndicatorUtils#yieldToPendingWriteActions(ProgressIndicator) */
+  public static void yieldToPendingWriteActions() {
+    yieldToPendingWriteActions(ProgressIndicatorProvider.getGlobalProgressIndicator());
   }
 
   /**
    * Run the given computation with its execution time restricted to the given amount of time in milliseconds.<p></p>
    *
-   * Internally, it creates a new {@link ProgressIndicator}, runs the computation with that indicator and cancels it after the the timeout.
+   * Internally, it creates a new {@link ProgressIndicator}, runs the computation with that indicator and cancels it after the timeout.
    * The computation should call {@link ProgressManager#checkCanceled()} frequently enough, so that after the timeout has been exceeded
    * it can stop the execution by throwing {@link ProcessCanceledException}, which will be caught by this {@code withTimeout}.<p></p>
    *

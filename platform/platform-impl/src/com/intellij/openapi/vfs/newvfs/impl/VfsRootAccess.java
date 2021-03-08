@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.vfs.newvfs.impl;
 
 import com.intellij.openapi.Disposable;
@@ -26,10 +26,7 @@ import com.intellij.util.PathUtil;
 import com.intellij.util.SystemProperties;
 import com.intellij.util.containers.CollectionFactory;
 import com.intellij.util.containers.ContainerUtil;
-import org.jetbrains.annotations.NonNls;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.TestOnly;
+import org.jetbrains.annotations.*;
 
 import java.io.File;
 import java.io.IOException;
@@ -123,7 +120,7 @@ public final class VfsRootAccess {
       allowed.add(FileUtil.toSystemIndependentName(findInUserHome(".m2")));
       allowed.add(FileUtil.toSystemIndependentName(findInUserHome(".gradle")));
 
-      // see IDEA-167037 The assertion "File accessed outside allowed root" is triggered by files symlinked from the the JDK installation folder
+      // see IDEA-167037 The assertion "File accessed outside allowed root" is triggered by files symlinked from the JDK installation folder
       allowed.add("/etc"); // After recent update of Oracle JDK 1.8 under Ubuntu Certain files in the JDK installation are symlinked to /etc
       allowed.add("/private/etc");
 
@@ -198,6 +195,7 @@ public final class VfsRootAccess {
 
   /** @deprecated Use {@link #allowRootAccess(Disposable, String...)} instead */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   @TestOnly
   public static void allowRootAccess(String @NotNull ... roots) {
     DeprecatedMethodException.report("Use `allowRootAccess(Disposable, String...)` instead");

@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.intellij.build.impl
 
 import com.intellij.openapi.util.JDOMUtil
@@ -15,11 +15,7 @@ import groovy.transform.TypeCheckingMode
 import org.jetbrains.annotations.NotNull
 import org.jetbrains.intellij.build.*
 import org.jetbrains.jps.model.artifact.JpsArtifactService
-import org.jetbrains.jps.model.java.JavaResourceRootProperties
-import org.jetbrains.jps.model.java.JavaResourceRootType
-import org.jetbrains.jps.model.java.JavaSourceRootProperties
-import org.jetbrains.jps.model.java.JavaSourceRootType
-import org.jetbrains.jps.model.java.JpsJavaExtensionService
+import org.jetbrains.jps.model.java.*
 import org.jetbrains.jps.model.library.JpsLibrary
 import org.jetbrains.jps.model.library.JpsOrderRootType
 import org.jetbrains.jps.model.module.JpsModule
@@ -32,12 +28,7 @@ import java.nio.file.StandardCopyOption
 import java.time.ZoneOffset
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
-import java.util.concurrent.Callable
-import java.util.concurrent.ExecutionException
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
-import java.util.concurrent.Future
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.*
 import java.util.function.Function
 
 @CompileStatic
@@ -123,7 +114,8 @@ final class BuildTasksImpl extends BuildTasks {
                                     List<String> arguments,
                                     Map<String, Object> systemProperties = Collections.emptyMap(),
                                     List<String> vmOptions = List.of("-Xmx512m"),
-                                    List<String> pluginsToDisable = Collections.emptyList()) {
+                                    List<String> pluginsToDisable = Collections.emptyList(),
+                                    long timeoutMillis = TimeUnit.MINUTES.toMillis(10L)) {
     Files.createDirectories(tempDir)
 
     Set<String> ideClasspath = new LinkedHashSet<String>()
@@ -166,7 +158,8 @@ final class BuildTasksImpl extends BuildTasks {
       "com.intellij.idea.Main",
       arguments,
       jvmArgs,
-      ideClasspath)
+      ideClasspath,
+      timeoutMillis)
   }
 
   private static void disableCompatibleIgnoredPlugins(@NotNull BuildContext context,
@@ -185,14 +178,7 @@ final class BuildTasksImpl extends BuildTasks {
 
   private Path patchIdeaPropertiesFile() {
     StringBuilder builder = new StringBuilder(Files.readString(buildContext.paths.communityHomeDir.resolve("bin/idea.properties")))
-    if (!buildContext.shouldIDECopyJarsByDefault()) {
-      builder.append("""
-#---------------------------------------------------------------------
-# IDE can copy library .jar files to prevent their locking. Set this property to 'false' to enable copying.
-#---------------------------------------------------------------------
-idea.jars.nocopy=true
-""")
-    }
+
     buildContext.productProperties.additionalIDEPropertiesFilePaths.each {
       builder.append('\n').append(Files.readString(Paths.get(it)))
     }
@@ -316,8 +302,7 @@ idea.fatal.error.notification=disabled
       }
 
       return context.messages.block("Build $builder.targetOs.osName Distribution") {
-        Path osSpecificDistDirectory = Paths.get(context.paths.buildOutputRoot, "dist.$builder.targetOs.distSuffix")
-        builder.copyFilesForOsDistribution(osSpecificDistDirectory)
+        Path osSpecificDistDirectory = DistributionJARsBuilder.getOsSpecificDistDirectory(builder.targetOs, context)
         builder.buildArtifacts(osSpecificDistDirectory)
         osSpecificDistDirectory
       }
@@ -775,37 +760,42 @@ idea.fatal.error.notification=disabled
         buildContext.messages.info("Started ${tasks.size()} tasks in parallel: ${tasks.collect { it.stepId }}")
         ExecutorService executorService = Executors.newWorkStealingPool()
         List<Pair<BuildTaskRunnable<V>, Future<Pair<V, Long>>>> futures = new ArrayList<Pair<BuildTaskRunnable<V>, Future<Pair<V, Long>>>>(tasks.size())
-        AtomicReference<Throwable> errorRef = new AtomicReference<>()
         for (BuildTaskRunnable<V> task : tasks) {
-          if (errorRef.get() != null) {
-            break
-          }
-
-          futures.add(new Pair<>(task, executorService.submit(createTaskWrapper(task, buildContext.forkForParallelTask(task.stepId), errorRef))))
+          futures.add(new Pair<>(task, executorService.submit(createTaskWrapper(task, buildContext.forkForParallelTask(task.stepId)))))
         }
 
         executorService.shutdown()
 
         // wait until all tasks finishes
+        List<Throwable> errors = new ArrayList<>()
+
         List<V> results = new ArrayList<>(futures.size())
         for (Pair<BuildTaskRunnable<V>, Future<Pair<V, Long>>> item : futures) {
-          Throwable error = errorRef.get()
+          try {
+            Pair<V, Long> result = item.second.get()
+            if (result == null) {
+              throw new IllegalStateException("Result from build step wrapper must not be null")
+            }
 
-          Pair<V, Long> result = item.second.get()
-
-          if (error != null) {
-            buildContext.messages.error("Cannot execute task", error)
-            // unreachable code - BuildException will be thrown
-            return results
+            results.add(result.first)
+            buildContext.messages.info("'${item.first.stepId}' task successfully finished in ${Formats.formatDuration(result.second)}")
           }
-
-          if (result == null) {
-            continue
+          catch (Throwable t) {
+            buildContext.messages.info("'${item.first.stepId}' task failed")
+            errors.add(new Exception("Cannot execute task ${item.first.stepId}", t))
           }
-
-          results.add(result.first)
-          buildContext.messages.info("'${item.first.stepId}' task finished in ${Formats.formatDuration(result.second)}")
         }
+
+        if (errors.size() > 0) {
+          Throwable aggregateException = errors.remove(0)
+          for (error in errors) {
+            aggregateException.addSuppressed(error)
+          }
+
+          // Will throw an exception
+          buildContext.messages.error("Some tasks failed", aggregateException)
+        }
+
         return results
       }
     }
@@ -817,24 +807,16 @@ idea.fatal.error.notification=disabled
     }
   }
 
-  private static <T> Callable<Pair<T, Long>> createTaskWrapper(BuildTaskRunnable<T> task, BuildContext buildContext, AtomicReference<Throwable> errorRef) {
+  private static <T> Callable<Pair<T, Long>> createTaskWrapper(BuildTaskRunnable<T> task, BuildContext buildContext) {
     return new Callable<Pair<T, Long>>() {
       @Override
       Pair<T, Long> call() throws Exception {
-        if (errorRef.get() != null) {
-          return null
-        }
-
         long start = System.currentTimeMillis()
         buildContext.messages.onForkStarted()
         try {
           T result = task.execute(buildContext)
           long duration = System.currentTimeMillis() - start
           return new Pair<T, Long>(result, duration)
-        }
-        catch (Throwable e) {
-          errorRef.compareAndSet(null, e)
-          return null
         }
         finally {
           buildContext.messages.onForkFinished()
@@ -903,9 +885,16 @@ idea.fatal.error.notification=disabled
     setupBundledMaven()
     Path patchedApplicationInfo = patchApplicationInfo()
     compileModulesForDistribution(patchedApplicationInfo).buildJARs(true)
+    def osSpecificPlugins = DistributionJARsBuilder.getOsSpecificDistDirectory(currentOs, buildContext).resolve("plugins")
+    if (Files.isDirectory(osSpecificPlugins)) {
+      Files.newDirectoryStream(osSpecificPlugins).withCloseable { children ->
+        children.each { Files.move(it, buildContext.paths.distAllDir.resolve("plugins").resolve(it.fileName)) }
+      }
+    }
+
     DistributionJARsBuilder.reorderJars(buildContext)
+    JvmArchitecture arch = SystemInfo.isArm64 ? JvmArchitecture.aarch64 : SystemInfo.is64Bit ? JvmArchitecture.x64 : JvmArchitecture.x32
     if (includeBinAndRuntime) {
-      JvmArchitecture arch = SystemInfo.isArm64 ? JvmArchitecture.aarch64 : SystemInfo.is64Bit ? JvmArchitecture.x64 : JvmArchitecture.x32
       setupJBre(arch.name())
     }
     layoutShared()
@@ -924,7 +913,7 @@ idea.fatal.error.notification=disabled
           builder = new MacDistributionBuilder(buildContext, buildContext.macDistributionCustomizer, propertiesFile)
           break
       }
-      builder.copyFilesForOsDistribution(targetDirectory)
+      builder.copyFilesForOsDistribution(targetDirectory, arch)
       Path jbrTargetDir = buildContext.bundledJreManager.extractJre(currentOs)
       if (currentOs == OsFamily.WINDOWS) {
         buildContext.ant.move(todir: targetDirectory.toString()) {
@@ -945,15 +934,19 @@ idea.fatal.error.notification=disabled
       }
     }
     else {
-      copyResourceFiles(buildContext, SystemInfoRt.isMac ? targetDirectory.resolve("Resources") : targetDirectory)
+      copyDistFiles(buildContext, targetDirectory)
       unpackPty4jNative(buildContext, targetDirectory, null)
     }
   }
 
-  static copyResourceFiles(@NotNull BuildContext buildContext, @NotNull Path newDir) {
+  static copyDistFiles(@NotNull BuildContext buildContext, @NotNull Path newDir) {
     Files.createDirectories(newDir)
-    for (Path file : buildContext.resourceFiles) {
-      Files.copy(file, newDir.resolve(file.fileName), StandardCopyOption.REPLACE_EXISTING)
+    for (Pair<Path, String> item : buildContext.distFiles) {
+      Path file = item.getFirst()
+
+      Path dir = newDir.resolve(item.getSecond())
+      Files.createDirectories(dir)
+      Files.copy(file, dir.resolve(file.fileName), StandardCopyOption.REPLACE_EXISTING)
     }
   }
 

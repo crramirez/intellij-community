@@ -28,9 +28,12 @@ import com.intellij.util.PathUtil
 import com.intellij.util.PathsList
 import com.intellij.util.SystemProperties
 import com.intellij.util.execution.ParametersListUtil
+import com.intellij.util.io.URLUtil
 import com.intellij.util.io.isDirectory
 import com.intellij.util.lang.UrlClassLoader
 import gnu.trove.THashMap
+import io.netty.bootstrap.com.intellij.execution.configurations.ParameterTargetValuePart
+import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.NonNls
 import org.jetbrains.concurrency.AsyncPromise
 import org.jetbrains.concurrency.Promise
@@ -38,6 +41,8 @@ import org.jetbrains.concurrency.collectResults
 import java.io.File
 import java.io.IOException
 import java.net.MalformedURLException
+import java.net.URI
+import java.net.URL
 import java.nio.charset.Charset
 import java.nio.charset.IllegalCharsetNameException
 import java.nio.charset.StandardCharsets
@@ -65,7 +70,7 @@ class JdkCommandLineSetup(private val request: TargetEnvironmentRequest,
 
   private val projectHomeOnTarget = VolumeDescriptor(VolumeType(JdkCommandLineSetup::class.java.simpleName + ":projectHomeOnTarget"),
                                                      "", "", "",
-                                                     request.projectPathOnTarget ?: "")
+                                                     request.projectPathOnTarget)
 
   /**
    * @param uploadPathIsFile
@@ -78,7 +83,7 @@ class JdkCommandLineSetup(private val request: TargetEnvironmentRequest,
                                       uploadPathIsFile: Boolean? = null): TargetValue<String> {
 
     val uploadPath = Paths.get(FileUtil.toSystemDependentName(uploadPathString))
-    val isDir = uploadPathIsFile ?: uploadPath.isDirectory()
+    val isDir = uploadPathIsFile?.not() ?: uploadPath.isDirectory()
     val localRootPath =
       if (isDir) uploadPath
       else (uploadPath.parent ?: Paths.get("."))  // Normally, paths should be absolute, but there are tests that check relative paths.
@@ -97,6 +102,44 @@ class JdkCommandLineSetup(private val request: TargetEnvironmentRequest,
         val resolvedTargetPath = volume.resolveTargetPath(relativePath)
         uploads.add(Upload(volume, relativePath))
         result.resolve(resolvedTargetPath)
+      }
+      catch (t: Throwable) {
+        LOG.warn(t)
+        targetProgressIndicator.stopWithErrorMessage(LangBundle.message("progress.message.failed.to.resolve.0.1", volume.localRoot,
+                                                                        t.localizedMessage))
+        result.resolveFailure(t)
+      }
+    }
+    return result
+  }
+
+  @Suppress("SameParameterValue")
+  @Deprecated("Temporary solution, while real download does not exist")
+  @ApiStatus.ScheduledForRemoval
+  private fun requestDownloadFromTarget(downloadPathString: String,
+                                        downloadPathIsFile: Boolean? = null): TargetValue<String> {
+    val downloadPath = Paths.get(FileUtil.toSystemDependentName(downloadPathString))
+    val isDir = downloadPathIsFile?.not() ?: downloadPath.isDirectory()
+    val localRootPath =
+      if (isDir) downloadPath
+      else (downloadPath.parent ?: Paths.get("."))  // Normally, paths should be absolute, but there are tests that check relative paths.
+
+    val downloadRoot = TargetEnvironment.DownloadRoot(localRootPath = localRootPath,
+                                                      targetRootPath = TargetEnvironment.TargetPath.Temporary())
+    request.downloadVolumes += downloadRoot
+    val result = DeferredTargetValue(downloadPathString)
+    dependingOnEnvironmentPromise += environmentPromise.then { (environment, targetProgressIndicator) ->
+      if (targetProgressIndicator.isCanceled || targetProgressIndicator.isStopped) {
+        result.stopProceeding()
+        return@then
+      }
+      val volume = environment.downloadVolumes.getValue(downloadRoot)
+      try {
+        val relativePath = if (isDir) "." else downloadPath.fileName.toString()
+        if (volume is TargetEnvironment.UploadableVolume) {
+          val resolvedTargetPath = volume.resolveTargetPath(relativePath)
+          result.resolve(resolvedTargetPath)
+        }
       }
       catch (t: Throwable) {
         LOG.warn(t)
@@ -234,8 +277,21 @@ class JdkCommandLineSetup(private val request: TargetEnvironmentRequest,
       }
     }
     if (!dynamicParameters) {
-      for (parameter in javaParameters.programParametersList.list) {
-        commandLine.addParameter(parameter!!)
+      for (parameter in javaParameters.programParametersList.targetedList) {
+        val values = mutableListOf<TargetValue<String>>()
+        for (part in parameter.parts) {
+          when (part) {
+            is ParameterTargetValuePart.Const ->
+              TargetValue.fixed(part.localValue)
+            is ParameterTargetValuePart.Path ->
+              requestUploadIntoTarget(JavaLanguageRuntimeType.CLASS_PATH_VOLUME, part.pathToUpload, null)
+            is ParameterTargetValuePart.PromiseValue ->
+              TargetValue.create(part.localValue, part.targetValue)
+            else ->
+              throw IllegalStateException("Unexpected parameter list part " + part.javaClass)
+          }.let { values.add(it) }
+        }
+        commandLine.addParameter(TargetValue.composite(values) { it.joinToString(separator = "") })
       }
     }
   }
@@ -266,7 +322,7 @@ class JdkCommandLineSetup(private val request: TargetEnvironmentRequest,
       }
 
       if (!dynamicVMOptions) { // dynamic options will be handled later by ArgFile
-        appendVmParameters(vmParameters)
+        appendVmParameters(javaParameters, vmParameters)
       }
 
       appendEncoding(javaParameters, vmParameters)
@@ -308,7 +364,7 @@ class JdkCommandLineSetup(private val request: TargetEnvironmentRequest,
         jarFile.addToManifest("VM-Options", ParametersListUtil.join(properties))
       }
       else {
-        appendVmParameters(vmParameters)
+        appendVmParameters(javaParameters, vmParameters)
       }
 
       appendEncoding(javaParameters, vmParameters)
@@ -371,7 +427,7 @@ class JdkCommandLineSetup(private val request: TargetEnvironmentRequest,
         }
       }
       else {
-        appendVmParameters(vmParameters)
+        appendVmParameters(javaParameters, vmParameters)
       }
 
       appendEncoding(javaParameters, vmParameters)
@@ -477,9 +533,17 @@ class JdkCommandLineSetup(private val request: TargetEnvironmentRequest,
     }
   }
 
-  private fun appendVmParameters(vmParameters: ParametersList) {
+  private fun appendVmParameters(javaParameters: SimpleJavaParameters, vmParameters: ParametersList) {
     vmParameters.list.forEach {
       appendVmParameter(it)
+    }
+    javaParameters.targetDependentParameters.asTargetParameters().forEach {
+      val value = it.apply(request)
+      value.resolvePaths(
+        uploadPathsResolver = { path -> requestUploadIntoTarget(JavaLanguageRuntimeType.AGENTS_VOLUME, path, true) },
+        downloadPathsResolver = { path -> requestDownloadFromTarget(path, true) }
+      )
+      commandLine.addParameter(value.parameter)
     }
   }
 
@@ -544,7 +608,7 @@ class JdkCommandLineSetup(private val request: TargetEnvironmentRequest,
   }
 
   private fun appendParamsEncodingClasspath(javaParameters: SimpleJavaParameters, vmParameters: ParametersList) {
-    appendVmParameters(vmParameters)
+    appendVmParameters(javaParameters, vmParameters)
     appendEncoding(javaParameters, vmParameters)
 
     val classPath = javaParameters.classPath
@@ -754,10 +818,24 @@ class JdkCommandLineSetup(private val request: TargetEnvironmentRequest,
     }
 
     @Throws(MalformedURLException::class)
-    private fun pathToUrl(path: String): String {
-      val file = File(path)
-      @Suppress("DEPRECATION") val url = if (notEscapeClassPathUrl) file.toURL() else file.toURI().toURL()
+    private fun pathToUrl(targetPath: String): String {
+      val url : URL = if (notEscapeClassPathUrl) {
+        // repeat login of `File(path).toURL()` without using system-dependent java.io.File
+        URL(URLUtil.FILE_PROTOCOL, "", slashify(targetPath))
+      }
+      else {
+        // repeat logic of `File(path).toURI().toURL()` without using system-dependent java.io.File
+        val p = slashify(targetPath)
+        URI(URLUtil.FILE_PROTOCOL, null, if (p.startsWith("//")) "//$p" else p, null).toURL()
+      }
       return url.toString()
+    }
+
+    // counterpart of java.io.File#slashify
+    private fun slashify(path: String): String {
+      return FileUtil.toSystemIndependentName(path).let {
+        if (it.startsWith("/")) it else "/$it"
+      }
     }
   }
 

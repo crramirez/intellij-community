@@ -2,6 +2,7 @@
 package com.jetbrains.python.packaging;
 
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.extensions.ExtensionPointListener;
 import com.intellij.openapi.extensions.PluginDescriptor;
 import com.intellij.openapi.project.Project;
@@ -24,11 +25,13 @@ import java.util.Optional;
  * @author yole
  */
 public class PyPackageManagersImpl extends PyPackageManagers {
+  private static final Logger LOG = Logger.getInstance(PyPackageManagersImpl.class);
+
   private final Map<String, PyPackageManager> myStandardManagers = new HashMap<>();
   private final Map<String, PyPackageManager> myProvidedManagers = new HashMap<>();
 
   public PyPackageManagersImpl() {
-    PyPackageManagerProvider.EP_NAME.addExtensionPointListener(new ExtensionPointListener<PyPackageManagerProvider>() {
+    PyPackageManagerProvider.EP_NAME.addExtensionPointListener(new ExtensionPointListener<>() {
       @Override
       public void extensionRemoved(@NotNull PyPackageManagerProvider extension, @NotNull PluginDescriptor pluginDescriptor) {
         clearProvidedManagersCache();
@@ -39,6 +42,9 @@ public class PyPackageManagersImpl extends PyPackageManagers {
   @Override
   @NotNull
   public synchronized PyPackageManager forSdk(@NotNull final Sdk sdk) {
+    if (sdk instanceof Disposable) {
+      LOG.assertTrue(!Disposer.isDisposed((Disposable)sdk), "Requesting a package manager for an already disposed SDK " + sdk);
+    }
     final String key = PythonSdkType.getSdkKey(sdk);
     PyPackageManager manager = myStandardManagers.get(key);
     if (manager == null) {

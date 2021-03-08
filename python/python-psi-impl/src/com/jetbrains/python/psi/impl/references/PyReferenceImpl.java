@@ -214,12 +214,16 @@ public class PyReferenceImpl implements PsiReferenceEx, PsiPolyVariantReference 
       return ResolveResultList.to(myElement);
     }
 
+    // Use real context here to enable correct completion and resolve in case of PyExpressionCodeFragment
+    final PsiElement realContext = PyPsiUtils.getRealContext(myElement);
+
+    if (!myContext.getTypeEvalContext().maySwitchToAST(realContext) && realContext instanceof PyFile) {
+      return ((PyFile)realContext).multiResolveName(referencedName);
+    }
+
     // here we have an unqualified expr. it may be defined:
     // ...in current file
     final PyResolveProcessor processor = new PyResolveProcessor(referencedName);
-
-    // Use real context here to enable correct completion and resolve in case of PyExpressionCodeFragment
-    final PsiElement realContext = PyPsiUtils.getRealContext(myElement);
 
     final PsiElement roof = findResolveRoof(referencedName, realContext);
     PyResolveUtil.scopeCrawlUp(processor, myElement, referencedName, roof);
@@ -249,6 +253,7 @@ public class PyReferenceImpl implements PsiReferenceEx, PsiPolyVariantReference 
             return StreamEx
               .of(resolvedElements)
               .nonNull()
+              .filter(element -> PyUtil.inSameFile(element, realContext))
               .filter(element -> PyiUtil.isOverload(element, typeEvalContext))
               .map(element -> new RatedResolveResult(getRate(element, typeEvalContext), element))
               .prepend(latestDefs)

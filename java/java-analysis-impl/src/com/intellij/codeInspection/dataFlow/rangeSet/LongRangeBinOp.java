@@ -70,6 +70,10 @@ public enum LongRangeBinOp {
       case PLUS:
         return left.plusWiden(right, isLong);
       case MINUS:
+        if (Long.valueOf(0).equals(left.getConstantValue())) {
+          // Unary minus
+          return left.minus(right, isLong);
+        }
         return left.plusWiden(right.negate(isLong), isLong);
       case MUL:
         return left.mulWiden(right, isLong);
@@ -81,6 +85,10 @@ public enum LongRangeBinOp {
   @Override
   public String toString() {
     return mySymbol;
+  }
+
+  public boolean isShift() {
+    return this == SHL || this == SHR || this == USHR;
   }
 
   /**

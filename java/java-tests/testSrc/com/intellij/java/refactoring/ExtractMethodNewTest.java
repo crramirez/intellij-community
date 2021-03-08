@@ -1426,6 +1426,10 @@ public class ExtractMethodNewTest extends LightJavaCodeInsightTestCase {
     }
   }
 
+  public void testNestedReference() throws Exception {
+    doTest();
+  }
+
   public void testQualifyWhenConflictingNamePresent() throws Exception {
     final CommonCodeStyleSettings settings = CodeStyle.getSettings(getProject()).getCommonSettings(JavaLanguage.INSTANCE);
     settings.ELSE_ON_NEW_LINE = true;
@@ -1871,10 +1875,10 @@ public class ExtractMethodNewTest extends LightJavaCodeInsightTestCase {
     }
 
     if (doRefactor) {
-      processor.testTargetClass(targetClass);
+      processor.setTargetClass(targetClass);
       processor.testPrepare(returnType, makeStatic);
       if (methodVisibility != null) processor.setMethodVisibility(methodVisibility);
-      processor.testNullability();
+      processor.prepareNullability();
       for (int param : disabledParams) {
         processor.doNotPassParameter(param);
       }

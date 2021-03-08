@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.project.impl
 
 import com.intellij.conversion.ConversionResult
@@ -13,6 +13,7 @@ import com.intellij.ide.IdeEventQueue
 import com.intellij.ide.SaveAndSyncHandler
 import com.intellij.ide.impl.OpenProjectTask
 import com.intellij.ide.impl.ProjectUtil
+import com.intellij.ide.impl.setTrusted
 import com.intellij.ide.lightEdit.LightEditCompatible
 import com.intellij.ide.startup.impl.StartupManagerImpl
 import com.intellij.openapi.application.ApplicationManager
@@ -193,6 +194,7 @@ open class ProjectManagerExImpl : ProjectManagerImpl() {
       val template = if (options.useDefaultProjectAsTemplate) defaultProject else null
       initProject(projectFile, project, options.isRefreshVfsNeeded, options.preloadServices, template,
                   ProgressManager.getInstance().progressIndicator)
+      project.setTrusted(true)
       return project
     }
     catch (t: Throwable) {
@@ -293,41 +295,58 @@ private fun checkExistingProjectOnOpen(projectToClose: Project,
                                        callback: ProjectOpenedCallback?,
                                        projectDir: Path?,
                                        projectManager: ProjectManagerExImpl): Boolean {
+  val result = CompletableFuture<Boolean>()
+
   val settings = GeneralSettings.getInstance()
   val isValidProject = projectDir != null && ProjectUtil.isValidProjectPath(projectDir)
-  if (projectDir != null && ProjectAttachProcessor.canAttachToProject() &&
-      (!isValidProject || settings.confirmOpenNewProject == GeneralSettings.OPEN_PROJECT_ASK)) {
-    val exitCode = ProjectUtil.confirmOpenOrAttachProject()
-    if (exitCode == -1) {
-      return true
-    }
-    else if (exitCode == GeneralSettings.OPEN_PROJECT_SAME_WINDOW) {
-      if (!projectManager.closeAndDispose(projectToClose)) {
-        return true
+
+  ApplicationManager.getApplication().invokeAndWait{
+    try {
+      if (projectDir != null && ProjectAttachProcessor.canAttachToProject() &&
+          (!isValidProject || settings.confirmOpenNewProject == GeneralSettings.OPEN_PROJECT_ASK)) {
+        val exitCode = ProjectUtil.confirmOpenOrAttachProject()
+        if (exitCode == -1) {
+          result.complete(true)
+          return@invokeAndWait
+        }
+        else if (exitCode == GeneralSettings.OPEN_PROJECT_SAME_WINDOW) {
+          if (!projectManager.closeAndDispose(projectToClose)) {
+            result.complete(true)
+            return@invokeAndWait
+          }
+        }
+        else if (exitCode == GeneralSettings.OPEN_PROJECT_SAME_WINDOW_ATTACH) {
+          if (PlatformProjectOpenProcessor.attachToProject(projectToClose, projectDir, callback)) {
+            result.complete(true)
+            return@invokeAndWait
+          }
+        }
+        // process all pending events that can interrupt focus flow
+        // todo this can be removed after taming the focus beast
+        IdeEventQueue.getInstance().flushQueue()
       }
-    }
-    else if (exitCode == GeneralSettings.OPEN_PROJECT_SAME_WINDOW_ATTACH) {
-      if (PlatformProjectOpenProcessor.attachToProject(projectToClose, projectDir, callback)) {
-        return true
+      else {
+        val exitCode = ProjectUtil.confirmOpenNewProject(false)
+        if (exitCode == GeneralSettings.OPEN_PROJECT_SAME_WINDOW) {
+          if (!projectManager.closeAndDispose(projectToClose)) {
+            result.complete(true)
+            return@invokeAndWait
+          }
+        }
+        else if (exitCode != GeneralSettings.OPEN_PROJECT_NEW_WINDOW) {
+          // not in a new window
+          result.complete(true)
+          return@invokeAndWait
+        }
       }
+
+      result.complete(false)
+    } catch (err: Throwable) {
+      result.completeExceptionally(err)
     }
-    // process all pending events that can interrupt focus flow
-    // todo this can be removed after taming the focus beast
-    IdeEventQueue.getInstance().flushQueue()
   }
-  else {
-    val exitCode = ProjectUtil.confirmOpenNewProject(false)
-    if (exitCode == GeneralSettings.OPEN_PROJECT_SAME_WINDOW) {
-      if (!projectManager.closeAndDispose(projectToClose)) {
-        return true
-      }
-    }
-    else if (exitCode != GeneralSettings.OPEN_PROJECT_NEW_WINDOW) {
-      // not in a new window
-      return true
-    }
-  }
-  return false
+
+  return result.get()
 }
 
 private fun openProject(project: Project, indicator: ProgressIndicator?, runStartUpActivities: Boolean) {

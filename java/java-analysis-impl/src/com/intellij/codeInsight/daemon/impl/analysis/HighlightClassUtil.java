@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 /*
  * Checks and Highlights problems with classes
@@ -42,7 +42,6 @@ import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.*;
 import com.intellij.util.JavaPsiConstructorUtil;
 import com.intellij.util.ObjectUtils;
-import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
 import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.NotNull;
@@ -281,6 +280,17 @@ public final class HighlightClassUtil {
     QuickFixAction.registerQuickFixAction(errorResult, QUICK_FIX_FACTORY.createRenameFileFix(aClass.getName() + JavaFileType.DOT_DEFAULT_EXTENSION));
     QuickFixAction.registerQuickFixAction(errorResult, QUICK_FIX_FACTORY.createRenameElementFix(aClass));
     return errorResult;
+  }
+  
+  static HighlightInfo checkClassMemberDeclaredOutside(@NotNull PsiErrorElement errorElement) { 
+    MemberModel model = MemberModel.create(errorElement);
+    if (model == null) return null;
+    HighlightInfo info = HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR)
+      .range(model.textRange())
+      .description(JavaErrorBundle.message("class.member.declared.outside"))
+      .create();
+    QuickFixAction.registerQuickFixAction(info, QUICK_FIX_FACTORY.createMoveMemberIntoClassFix(errorElement));
+    return info;
   }
 
   /**
@@ -677,7 +687,7 @@ public final class HighlightClassUtil {
     return null;
   }
 
-  static HighlightInfo checkExtendsDuplicate(@NotNull PsiJavaCodeReferenceElement element, @Nullable PsiElement resolved, @NotNull PsiFile containingFile) {
+  public static HighlightInfo checkExtendsDuplicate(@NotNull PsiJavaCodeReferenceElement element, @Nullable PsiElement resolved, @NotNull PsiFile containingFile) {
     if (!(element.getParent() instanceof PsiReferenceList)) return null;
     PsiReferenceList list = (PsiReferenceList)element.getParent();
     if (!(list.getParent() instanceof PsiClass)) return null;
@@ -694,7 +704,10 @@ public final class HighlightClassUtil {
     }
     if (dupCount > 1) {
       String description = JavaErrorBundle.message("duplicate.class", HighlightUtil.formatClass(aClass));
-      return HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(element).descriptionAndTooltip(description).create();
+      HighlightInfo info =
+        HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(element).descriptionAndTooltip(description).create();
+      QuickFixAction.registerQuickFixAction(info, QUICK_FIX_FACTORY.createUnimplementInterfaceAction(true));
+      return info;
     }
     return null;
   }
@@ -1164,25 +1177,38 @@ public final class HighlightClassUtil {
                            .descriptionAndTooltip(JavaErrorBundle.message("class.not.allowed.to.extend.sealed.class.from.another.module"))
                            .create());
             }
+            else if (!hasPermittedSubclassModifier(inheritorClass)) {
+              HighlightInfo info = HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR)
+                .range(permitted)
+                .descriptionAndTooltip(JavaErrorBundle.message("permitted.subclass.must.have.modifier"))
+                .create();
+              IntentionAction markNonSealed = QUICK_FIX_FACTORY.createModifierListFix(inheritorClass, PsiModifier.NON_SEALED, true, false);
+              QuickFixAction.registerQuickFixAction(info, markNonSealed);
+              boolean hasInheritors = DirectClassInheritorsSearch.search(inheritorClass).findFirst() != null;
+              IntentionAction action = hasInheritors ?
+                                       QUICK_FIX_FACTORY.createSealClassFromPermitsListFix(inheritorClass) :
+                                       QUICK_FIX_FACTORY.createModifierListFix(inheritorClass, PsiModifier.FINAL, true, false);
+              QuickFixAction.registerQuickFixAction(info, action);
+              holder.add(info);
+            }
           }
         }
       }
     }
   }
 
-  public static @NotNull List<HighlightInfo> checkSealedClassInheritors(PsiClass psiClass) {
+  public static @Nullable HighlightInfo checkSealedClassInheritors(PsiClass psiClass) {
     if (psiClass.hasModifierProperty(PsiModifier.SEALED)) {
       PsiIdentifier nameIdentifier = psiClass.getNameIdentifier();
-      if (nameIdentifier == null) return Collections.emptyList();
-      if (psiClass.isEnum()) return Collections.emptyList();
+      if (nameIdentifier == null) return null;
+      if (psiClass.isEnum()) return null;
 
       Collection<PsiClass> inheritors = DirectClassInheritorsSearch.search(psiClass).findAll();
       if (inheritors.isEmpty()) {
-        HighlightInfo info = HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR)
+        return HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR)
           .range(nameIdentifier)
           .descriptionAndTooltip(JavaErrorBundle.message("sealed.must.have.inheritors"))
           .create();
-        return Collections.singletonList(info);
       }
       PsiFile parentFile = psiClass.getContainingFile();
       boolean hasOutsideClasses = inheritors.stream().anyMatch(inheritor -> inheritor.getContainingFile() != parentFile);
@@ -1196,28 +1222,11 @@ public final class HighlightClassUtil {
             .descriptionAndTooltip(JavaErrorBundle.message("permit.list.must.contain.outside.inheritors"))
             .create();
           QuickFixAction.registerQuickFixAction(info, QUICK_FIX_FACTORY.createFillPermitsListFix(nameIdentifier));
-          return Collections.singletonList(info);
+          return info;
         }
-        List<HighlightInfo> infos = new SmartList<>();
-        permittedClassesRefs.forEach((classRef, permittedClass) -> {
-          if (permittedClass == null || hasPermittedSubclassModifier(permittedClass)) return;
-          HighlightInfo info = HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR)
-            .range(classRef)
-            .descriptionAndTooltip(JavaErrorBundle.message("permitted.subclass.must.have.modifier"))
-            .create();
-          IntentionAction markNonSealed = QUICK_FIX_FACTORY.createModifierListFix(permittedClass, PsiModifier.NON_SEALED, true, false);
-          QuickFixAction.registerQuickFixAction(info, markNonSealed);
-          boolean hasInheritors = DirectClassInheritorsSearch.search(permittedClass).findFirst() != null;
-          IntentionAction action = hasInheritors ?
-                                   QUICK_FIX_FACTORY.createSealClassFromPermitsListFix(permittedClass) :
-                                   QUICK_FIX_FACTORY.createModifierListFix(permittedClass, PsiModifier.FINAL, true, false);
-          QuickFixAction.registerQuickFixAction(info, action);
-          infos.add(info);
-        });
-        return infos;
       }
     }
-    return Collections.emptyList();
+    return null;
   }
   
   private static @NotNull Map<PsiJavaCodeReferenceElement, PsiClass> getPermittedClassesRefs(@NotNull PsiClass psiClass) {

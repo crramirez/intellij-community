@@ -1,9 +1,9 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.plugins.github.ui.cloneDialog
 
 import com.intellij.dvcs.repo.ClonePathProvider
 import com.intellij.dvcs.ui.CloneDvcsValidationUtils
-import com.intellij.dvcs.ui.DvcsBundle.getString
+import com.intellij.dvcs.ui.DvcsBundle.message
 import com.intellij.dvcs.ui.SelectChildTextFieldWithBrowseButton
 import com.intellij.icons.AllIcons
 import com.intellij.ide.BrowserUtil
@@ -43,7 +43,7 @@ import git4idea.GitUtil
 import git4idea.checkout.GitCheckoutProvider
 import git4idea.commands.Git
 import git4idea.remote.GitRememberedInputs
-import icons.GithubIcons
+import org.jetbrains.plugins.github.GithubIcons
 import org.jetbrains.plugins.github.api.*
 import org.jetbrains.plugins.github.api.data.GithubAuthenticatedUser
 import org.jetbrains.plugins.github.api.data.GithubRepo
@@ -83,8 +83,8 @@ internal abstract class GHCloneDialogExtensionComponentBase(
   private val githubGitHelper: GithubGitHelper = GithubGitHelper.getInstance()
 
   // UI
-  private val defaultAvatar = resizeIcon(GithubIcons.DefaultAvatar, VcsCloneDialogUiSpec.Components.avatarSize)
-  private val defaultPopupAvatar = resizeIcon(GithubIcons.DefaultAvatar, VcsCloneDialogUiSpec.Components.popupMenuAvatarSize)
+  private val defaultAvatar = IconUtil.resizeSquared(GithubIcons.DefaultAvatar, VcsCloneDialogUiSpec.Components.avatarSize)
+  private val defaultPopupAvatar = IconUtil.resizeSquared(GithubIcons.DefaultAvatar, VcsCloneDialogUiSpec.Components.popupMenuAvatarSize)
   private val avatarSizeUiInt = JBValue.UIInteger("GHCloneDialogExtensionComponent.popupAvatarSize",
                                                   VcsCloneDialogUiSpec.Components.popupMenuAvatarSize)
 
@@ -107,8 +107,8 @@ internal abstract class GHCloneDialogExtensionComponentBase(
     val fcd = FileChooserDescriptorFactory.createSingleFolderDescriptor()
     fcd.isShowFileSystemRoots = true
     fcd.isHideIgnored = false
-    addBrowseFolderListener(getString("clone.destination.directory.browser.title"),
-                            getString("clone.destination.directory.browser.description"),
+    addBrowseFolderListener(message("clone.destination.directory.browser.title"),
+                            message("clone.destination.directory.browser.description"),
                             project,
                             fcd)
   }
@@ -266,7 +266,7 @@ internal abstract class GHCloneDialogExtensionComponentBase(
         userDetailsByAccount[account] = user
         val avatar = iconProvider.getIcon(user.avatarUrl, avatarSizeUiInt.get())
         avatarsByAccount[account] = avatar
-        accountComponents[account]?.icon = resizeIcon(avatar, VcsCloneDialogUiSpec.Components.avatarSize)
+        accountComponents[account]?.icon = IconUtil.resizeSquared(avatar, VcsCloneDialogUiSpec.Components.avatarSize)
         refillRepositories()
       }
 
@@ -451,11 +451,6 @@ internal abstract class GHCloneDialogExtensionComponentBase(
       // Contract is "true if this set did not already contain the specified element"
       return !wasThere
     }
-  }
-
-  private fun resizeIcon(icon: Icon, size: Int): Icon {
-    val scale = JBUI.scale(size).toFloat() / icon.iconWidth.toFloat()
-    return IconUtil.scale(icon, null, scale)
   }
 
   protected abstract fun createAccountMenuLoginActions(account: GithubAccount?): Collection<Action>

@@ -18,6 +18,7 @@ import com.intellij.psi.impl.PsiDocumentManagerBase
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.jetbrains.annotations.ApiStatus
 import java.util.concurrent.Executor
 import java.util.function.BooleanSupplier
 import kotlin.coroutines.ContinuationInterceptor
@@ -139,6 +140,7 @@ internal class AppUIExecutorImpl private constructor(private val modality: Modal
 
   @Deprecated("Beware, context might be infectious, if coroutine resumes other waiting coroutines. " +
               "Use runUndoTransparentWriteAction instead.", ReplaceWith("this"))
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.2")
   fun inUndoTransparentAction(): AppUIExecutorImpl {
     return withConstraint(object : ContextConstraint {
       override fun isCorrectContext(): Boolean =
@@ -154,6 +156,7 @@ internal class AppUIExecutorImpl private constructor(private val modality: Modal
 
   @Deprecated("Beware, context might be infectious, if coroutine resumes other waiting coroutines. " +
               "Use runWriteAction instead.", ReplaceWith("this"))
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.2")
   fun inWriteAction(): AppUIExecutorImpl {
     return withConstraint(object : ContextConstraint {
       override fun isCorrectContext(): Boolean =
@@ -174,12 +177,14 @@ internal class AppUIExecutorImpl private constructor(private val modality: Modal
 
 @Deprecated("Beware, context might be infectious, if coroutine resumes other waiting coroutines. " +
             "Use runUndoTransparentWriteAction instead.", ReplaceWith("this"))
+@ApiStatus.ScheduledForRemoval(inVersion = "2021.2")
 fun AppUIExecutor.inUndoTransparentAction(): AppUIExecutor {
   return (this as AppUIExecutorImpl).inUndoTransparentAction()
 }
 
 @Deprecated("Beware, context might be infectious, if coroutine resumes other waiting coroutines. " +
             "Use runWriteAction instead.", ReplaceWith("this"))
+@ApiStatus.ScheduledForRemoval(inVersion = "2021.2")
 fun AppUIExecutor.inWriteAction():AppUIExecutor {
   return (this as AppUIExecutorImpl).inWriteAction()
 }
@@ -231,7 +236,7 @@ internal class InSmartMode(private val project: Project) : ContextConstraint {
     }
   }
 
-  override fun isCorrectContext() = !DumbService.getInstance(project).isDumb
+  override fun isCorrectContext() = !project.isDisposed && !DumbService.isDumb(project)
 
   override fun schedule(runnable: Runnable) {
     DumbService.getInstance(project).runWhenSmart(runnable)

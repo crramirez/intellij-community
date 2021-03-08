@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ui
 
 import com.intellij.icons.AllIcons
@@ -54,7 +54,7 @@ import javax.swing.text.html.StyleSheet
  * with gotItTooltipAllowlist extension point. Prefix can cover a whole class of different gotit tooltips.
  * If prefix is shorter than the whole ID then all different tooltip usages will be reported in one category described by the prefix.
  */
-class GotItTooltip(@NonNls val id: String, @Nls val text: String, parentDisposable: Disposable) : Disposable {
+class GotItTooltip(@NonNls val id: String, @Nls val text: String, private val parentDisposable: Disposable) : Disposable {
   private class ActionContext(val tooltip: GotItTooltip, val pointProvider: (Component) -> Point)
 
   @Nls
@@ -271,6 +271,7 @@ class GotItTooltip(@NonNls val id: String, @Nls val text: String, parentDisposab
    */
   fun assignTo(presentation: Presentation, pointProvider: (Component) -> Point) {
     presentation.putClientProperty(PRESENTATION_KEY, ActionContext(this, pointProvider))
+    Disposer.register(this, Disposable { presentation.putClientProperty(PRESENTATION_KEY, null) })
   }
 
   private fun showImpl(component: JComponent, pointProvider: (Component) -> Point) {
@@ -521,6 +522,21 @@ class GotItTooltip(@NonNls val id: String, @Nls val text: String, parentDisposab
 
   override fun dispose() {
     hideBalloon()
+    removeMeFromQueue()
+  }
+
+  private fun removeMeFromQueue() {
+    if (currentlyShown === this) currentlyShown = nextToShow
+    else {
+      var tooltip = currentlyShown
+      while(tooltip != null) {
+        if (tooltip.nextToShow === this) {
+          tooltip.nextToShow = nextToShow
+          break
+        }
+        tooltip = tooltip.nextToShow
+      }
+    }
   }
 
   private fun hideBalloon() {
@@ -554,7 +570,7 @@ class GotItTooltip(@NonNls val id: String, @Nls val text: String, parentDisposab
     private val SHORTCUT_COLOR = JBColor.namedColor("GotItTooltip.shortcutForeground", JBUI.CurrentTheme.Tooltip.shortcutForeground())
     private val BACKGROUND_COLOR = JBColor.namedColor("GotItTooltip.background", UIUtil.getToolTipBackground())
     private val BORDER_COLOR = JBColor.namedColor("GotItTooltip.borderColor", JBUI.CurrentTheme.Tooltip.borderColor())
-    private val LINK_FOREGROUND = JBColor.namedColor("GotItTooltip.linkForeground", JBUI.CurrentTheme.Link.linkColor())
+    private val LINK_FOREGROUND = JBColor.namedColor("GotItTooltip.linkForeground", JBUI.CurrentTheme.Link.Foreground.ENABLED)
 
     private val PANEL_MARGINS = JBUI.Borders.empty(7, 4, 9, 9)
 

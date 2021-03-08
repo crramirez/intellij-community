@@ -23,6 +23,7 @@ import com.intellij.openapi.util.Disposer.isDisposed
 import com.intellij.openapi.vcs.changes.ui.ChangesTree
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.util.EditSourceOnDoubleClickHandler.isToggleEvent
+import com.intellij.util.IJSwingUtilities
 import com.intellij.util.Processor
 import com.intellij.util.ui.update.DisposableUpdate
 import com.intellij.util.ui.update.MergingUpdateQueue
@@ -155,7 +156,7 @@ abstract class EditorTabPreview(protected val diffProcessor: DiffRequestProcesso
 
   companion object {
     fun openPreview(project: Project, file: PreviewDiffVirtualFile, focusEditor: Boolean): Array<out FileEditor> {
-      return EditorDiffPreviewFilesManager.getInstance().openFile(project, file, focusEditor)
+      return VcsEditorTabFilesManager.getInstance().openFile(project, file, focusEditor)
     }
 
     fun registerEscapeHandler(editor: FileEditor, handler: Runnable) {
@@ -172,7 +173,10 @@ private class EditorTabDiffPreviewProvider(
   private val diffProcessor: DiffRequestProcessor,
   private val tabNameProvider: () -> String?
 ) : ChainBackedDiffPreviewProvider {
-  override fun createDiffRequestProcessor(): DiffRequestProcessor = diffProcessor
+  override fun createDiffRequestProcessor(): DiffRequestProcessor {
+    IJSwingUtilities.updateComponentTreeUI(diffProcessor.component)
+    return diffProcessor
+  }
 
   override fun getOwner(): Any = this
 

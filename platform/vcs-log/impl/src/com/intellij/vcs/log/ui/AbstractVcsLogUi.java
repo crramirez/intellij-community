@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.vcs.log.ui;
 
 import com.google.common.util.concurrent.SettableFuture;
@@ -45,7 +45,7 @@ public abstract class AbstractVcsLogUi implements VcsLogUiEx, Disposable {
   @NotNull protected final Collection<VcsLogListener> myLogListeners = ContainerUtil.createLockFreeCopyOnWriteList();
   @NotNull protected final VisiblePackChangeListener myVisiblePackChangeListener;
 
-  @NotNull protected VisiblePack myVisiblePack = VisiblePack.EMPTY;
+  @NotNull protected volatile VisiblePack myVisiblePack = VisiblePack.EMPTY;
 
   public AbstractVcsLogUi(@NotNull String id,
                           @NotNull VcsLogData logData,
@@ -120,29 +120,29 @@ public abstract class AbstractVcsLogUi implements VcsLogUiEx, Disposable {
   @Override
   @NotNull
   public VisiblePack getDataPack() {
-    ApplicationManager.getApplication().assertIsDispatchThread();
     return myVisiblePack;
   }
 
   @Override
-  public <T> void jumpTo(@NotNull final T commitId,
-                         @NotNull final PairFunction<GraphTableModel, T, Integer> rowGetter,
-                         @NotNull final SettableFuture<? super Boolean> future,
-                         boolean silently) {
+  public <T> void jumpTo(@NotNull T commitId,
+                         @NotNull PairFunction<? super VisiblePack, ? super T, Integer> rowGetter,
+                         @NotNull SettableFuture<? super Boolean> future,
+                         boolean silently,
+                         boolean focus) {
     if (future.isCancelled()) return;
 
     GraphTableModel model = getTable().getModel();
 
-    int result = rowGetter.fun(model, commitId);
+    int result = rowGetter.fun(myVisiblePack, commitId);
     if (result >= 0) {
-      getTable().jumpToRow(result);
+      getTable().jumpToRow(result, focus);
       future.set(true);
     }
     else if (model.canRequestMore()) {
-      model.requestToLoadMore(() -> jumpTo(commitId, rowGetter, future, silently));
+      model.requestToLoadMore(() -> jumpTo(commitId, rowGetter, future, silently, focus));
     }
     else if (!myVisiblePack.isFull()) {
-      invokeOnChange(() -> jumpTo(commitId, rowGetter, future, silently));
+      invokeOnChange(() -> jumpTo(commitId, rowGetter, future, silently, focus));
     }
     else {
       if (!silently) handleCommitNotFound(commitId, result == GraphTableModel.COMMIT_DOES_NOT_MATCH, rowGetter);
@@ -152,7 +152,7 @@ public abstract class AbstractVcsLogUi implements VcsLogUiEx, Disposable {
 
   protected <T> void handleCommitNotFound(@NotNull T commitId,
                                           boolean commitExists,
-                                          @NotNull PairFunction<GraphTableModel, T, Integer> rowGetter) {
+                                          @NotNull PairFunction<? super VisiblePack, ? super T, Integer> rowGetter) {
     String message = getCommitNotFoundMessage(commitId, commitExists);
     VcsBalloonProblemNotifier.showOverChangesView(myProject, message, MessageType.WARNING);
   }

@@ -11,6 +11,7 @@ import com.intellij.execution.process.*;
 import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.execution.runners.ProgramRunner;
 import com.intellij.execution.target.*;
+import com.intellij.execution.target.local.LocalTargetEnvironment;
 import com.intellij.execution.testDiscovery.JavaAutoRunManager;
 import com.intellij.execution.testframework.*;
 import com.intellij.execution.testframework.actions.AbstractRerunFailedTestsAction;
@@ -63,6 +64,7 @@ import org.jdom.Element;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.concurrency.AsyncPromise;
 import org.jetbrains.jps.model.serialization.PathMacroUtil;
 
 import java.io.File;
@@ -88,6 +90,7 @@ public abstract class JavaTestFrameworkRunnableState<T extends
   }
 
   protected ServerSocket myServerSocket;
+  protected AsyncPromise<String> myPortPromise;
   protected File myTempFile;
   protected File myWorkingDirsFile = null;
 
@@ -95,6 +98,7 @@ public abstract class JavaTestFrameworkRunnableState<T extends
   private final List<ArgumentFileFilter> myArgumentFileFilters = new ArrayList<>();
 
   @Nullable private volatile TargetProgressIndicator myTargetProgressIndicator = null;
+  @Nullable private volatile TargetEnvironment.LocalPortBinding myPortBindingForSocket;
 
   public void setRemoteConnectionCreator(RemoteConnectionCreator remoteConnectionCreator) {
     this.remoteConnectionCreator = remoteConnectionCreator;
@@ -132,19 +136,23 @@ public abstract class JavaTestFrameworkRunnableState<T extends
     appendForkInfo(executor);
     appendRepeatMode();
 
-    SearchForTestsTask searchForTestsTask = createSearchingForTestsTask();
+    TargetEnvironment remoteEnvironment = getEnvironment().getPreparedTargetEnvironment(this, TargetProgressIndicator.EMPTY);
+    TargetedCommandLineBuilder targetedCommandLineBuilder = getTargetedCommandLine();
+    TargetedCommandLine targetedCommandLine = targetedCommandLineBuilder.build();
+
+    resolveServerSocketPort(remoteEnvironment);
+
+    Process process = remoteEnvironment.createProcess(targetedCommandLine, new EmptyProgressIndicator());
+
+    SearchForTestsTask searchForTestsTask = createSearchingForTestsTask(remoteEnvironment);
     if (searchForTestsTask != null) {
       searchForTestsTask.arrangeForIndexAccess();
       searchForTestsTask.setIncompleteIndexUsageCallback(() -> viewer.setIncompleteIndexUsed());
     }
 
-    TargetEnvironment remoteEnvironment = getEnvironment().getPreparedTargetEnvironment(this, TargetProgressIndicator.EMPTY);
-    TargetedCommandLineBuilder targetedCommandLineBuilder = getTargetedCommandLine();
-    TargetedCommandLine targetedCommandLine = targetedCommandLineBuilder.build();
-    Process process = remoteEnvironment.createProcess(targetedCommandLine, new EmptyProgressIndicator());
-
     OSProcessHandler processHandler = new KillableColoredProcessHandler.Silent(process,
-                                                                               targetedCommandLine.getCommandPresentation(remoteEnvironment),
+                                                                               targetedCommandLine
+                                                                                 .getCommandPresentation(remoteEnvironment),
                                                                                targetedCommandLine.getCharset(),
                                                                                targetedCommandLineBuilder.getFilesToDeleteOnTermination());
 
@@ -155,8 +163,25 @@ public abstract class JavaTestFrameworkRunnableState<T extends
     return processHandler;
   }
 
-  public SearchForTestsTask createSearchingForTestsTask() throws ExecutionException {
+  public void resolveServerSocketPort(@NotNull TargetEnvironment remoteEnvironment) {
+    if (myServerSocket != null) {
+      boolean local = remoteEnvironment instanceof LocalTargetEnvironment;
+      int port = local ? myServerSocket.getLocalPort() : remoteEnvironment.getLocalPortBindings().get(myPortBindingForSocket).getPort();
+      myPortPromise.setResult(String.valueOf(port));
+   }
+  }
+
+  /**
+   * @deprecated Use {@link #createSearchingForTestsTask(TargetEnvironment)} instead
+   */
+  @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.2")
+  public @Nullable SearchForTestsTask createSearchingForTestsTask() throws ExecutionException {
     return null;
+  }
+
+  public @Nullable SearchForTestsTask createSearchingForTestsTask(@NotNull TargetEnvironment targetEnvironment) throws ExecutionException {
+    return createSearchingForTestsTask();
   }
 
   protected boolean configureByModule(Module module) {
@@ -172,16 +197,11 @@ public abstract class JavaTestFrameworkRunnableState<T extends
                                               @Nullable TargetEnvironmentConfiguration configuration,
                                               @NotNull TargetProgressIndicator targetProgressIndicator) throws ExecutionException {
     myTargetProgressIndicator = targetProgressIndicator;
-    try {
-      T myConfiguration = getConfiguration();
-      if (myConfiguration.getProjectPathOnTarget() != null) {
-        request.setProjectPathOnTarget(myConfiguration.getProjectPathOnTarget());
-      }
-      super.prepareTargetEnvironmentRequest(request, configuration, targetProgressIndicator);
+    T myConfiguration = getConfiguration();
+    if (myConfiguration.getProjectPathOnTarget() != null) {
+      request.setProjectPathOnTarget(myConfiguration.getProjectPathOnTarget());
     }
-    finally {
-      myTargetProgressIndicator = null;
-    }
+    super.prepareTargetEnvironmentRequest(request, configuration, targetProgressIndicator);
   }
 
   /**
@@ -221,7 +241,7 @@ public abstract class JavaTestFrameworkRunnableState<T extends
     final SMTRunnerConsoleProperties testConsoleProperties = getConfiguration().createTestConsoleProperties(executor);
     testConsoleProperties.setIfUndefined(TestConsoleProperties.HIDE_PASSED_TESTS, false);
 
-    final BaseTestsOutputConsoleView consoleView = SMTestRunnerConnectionUtil.createConsole(getFrameworkName(), testConsoleProperties);
+    final BaseTestsOutputConsoleView consoleView = UIUtil.invokeAndWaitIfNeeded(() -> SMTestRunnerConnectionUtil.createConsole(getFrameworkName(), testConsoleProperties));
     final SMTestRunnerResultsForm viewer = ((SMTRunnerConsoleView)consoleView).getResultsViewer();
     Disposer.register(getConfiguration().getProject(), consoleView);
 
@@ -569,7 +589,13 @@ public abstract class JavaTestFrameworkRunnableState<T extends
   protected void createServerSocket(JavaParameters javaParameters) {
     try {
       myServerSocket = new ServerSocket(0, 0, InetAddress.getByName("127.0.0.1"));
-      javaParameters.getProgramParametersList().add("-socket" + myServerSocket.getLocalPort());
+      myPortPromise = new AsyncPromise<>();
+      javaParameters.getProgramParametersList().add(new CompositeParameterTargetedValue("-socket").addTargetPart(String.valueOf(myServerSocket.getLocalPort()), myPortPromise));
+      TargetEnvironmentRequest request = getTargetEnvironmentRequest();
+      if (request != null) {
+        myPortBindingForSocket = new TargetEnvironment.LocalPortBinding(myServerSocket.getLocalPort(), null);
+        request.getLocalPortBindings().add(myPortBindingForSocket);
+      }
     }
     catch (IOException e) {
       LOG.error(e);
@@ -619,7 +645,8 @@ public abstract class JavaTestFrameworkRunnableState<T extends
   protected void createTempFiles(JavaParameters javaParameters) {
     try {
       myWorkingDirsFile = FileUtil.createTempFile("idea_working_dirs_" + getFrameworkId(), ".tmp", true);
-      javaParameters.getProgramParametersList().add("@w@" + myWorkingDirsFile.getAbsolutePath());
+      javaParameters.getProgramParametersList()
+        .add(new CompositeParameterTargetedValue().addLocalPart("@w@").addPathPart(myWorkingDirsFile));
 
       myTempFile = FileUtil.createTempFile("idea_" + getFrameworkId(), ".tmp", true);
       passTempFile(javaParameters.getProgramParametersList(), myTempFile.getAbsolutePath());

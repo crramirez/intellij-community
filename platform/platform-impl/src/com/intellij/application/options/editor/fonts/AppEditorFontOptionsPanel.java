@@ -30,13 +30,12 @@ import com.intellij.openapi.editor.colors.impl.FontPreferencesImpl;
 import com.intellij.openapi.editor.impl.FontFamilyService;
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.options.ex.Settings;
-import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.AbstractFontCombo;
 import com.intellij.ui.HoverHyperlinkLabel;
 import com.intellij.ui.IdeBorderFactory;
 import com.intellij.ui.JBColor;
+import com.intellij.ui.components.ActionLink;
 import com.intellij.util.ObjectUtils;
-import com.intellij.util.SystemProperties;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
@@ -48,11 +47,15 @@ import javax.swing.event.HyperlinkListener;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.util.Objects;
 import java.util.function.Consumer;
 
 public class AppEditorFontOptionsPanel extends AbstractFontOptionsPanel {
-  private final AppEditorFontPanel myMainPanel;
+
+  private final static int FONT_WEIGHT_COMBO_WIDTH = 250;
+
   private final EditorColorsScheme myScheme;
   private JPanel myWarningPanel;
   private JLabel myEditorFontLabel;
@@ -60,8 +63,9 @@ public class AppEditorFontOptionsPanel extends AbstractFontOptionsPanel {
   private FontWeightCombo myRegularWeightCombo;
   private FontWeightCombo myBoldWeightCombo;
 
-  protected AppEditorFontOptionsPanel(@NotNull AppEditorFontPanel mainPanel, EditorColorsScheme scheme) {
-    myMainPanel = mainPanel;
+  private ActionLink myRestoreLabel;
+
+  protected AppEditorFontOptionsPanel(EditorColorsScheme scheme) {
     myScheme = scheme;
     myDefaultPreferences = new FontPreferencesImpl();
     AppEditorFontOptions.initDefaults((ModifiableFontPreferences)myDefaultPreferences);
@@ -80,7 +84,10 @@ public class AppEditorFontOptionsPanel extends AbstractFontOptionsPanel {
     topPanel.add(myWarningPanel, c);
     c.gridy ++;
     topPanel.add(createFontSettingsPanel(), c);
-    c.insets = JBUI.insets(5, 0, 0, 0);
+    c.gridy ++;
+    c.insets = JBUI.insets(ADDITIONAL_VERTICAL_GAP, BASE_INSET, 0, 0);
+    myRestoreLabel = createRestoreLabel();
+    topPanel.add(myRestoreLabel, c);
     c.fill = GridBagConstraints.HORIZONTAL;
     c.gridy ++;
     c.insets = JBUI.insets(ADDITIONAL_VERTICAL_GAP, 0);
@@ -102,19 +109,32 @@ public class AppEditorFontOptionsPanel extends AbstractFontOptionsPanel {
   }
 
   private JPanel createTypographySettingsPanel() {
-    JPanel typographyPanel = new JPanel(new GridBagLayout());
-    typographyPanel.setBorder(IdeBorderFactory.createTitledBorder(ApplicationBundle.message("settings.editor.font.typography.settings")));
+    JPanel typographyPanel = new JPanel(new BorderLayout());
+
+    JPanel expansionPanel = new JPanel(new BorderLayout());
+    expansionPanel.setBorder(JBUI.Borders.empty());
+    JPanel titlePanel = new JPanel(new BorderLayout());
+    titlePanel.setBorder(IdeBorderFactory.createTitledBorder(ApplicationBundle.message("settings.editor.font.typography.settings"), false, JBUI.emptyInsets()));
+    expansionPanel.add(titlePanel, BorderLayout.CENTER);
+    JLabel arrowLabel = new JLabel(AllIcons.General.ArrowRight);
+    arrowLabel.setBorder(JBUI.Borders.empty(0, 2, 10, 5));
+    expansionPanel.add(arrowLabel, BorderLayout.WEST);
+
+    typographyPanel.add(expansionPanel, BorderLayout.NORTH);
+
+    JPanel internalPanel = new JPanel(new GridBagLayout());
+    internalPanel.setBorder(JBUI.Borders.empty());
     GridBagConstraints c = new GridBagConstraints();
     c.insets = getInsets(0, 0);
     c.gridx = 0;
     c.gridy = 0;
     c.anchor = GridBagConstraints.LINE_START;
     if (isAdvancedFontFamiliesUI()) {
-      typographyPanel.add(new JLabel(ApplicationBundle.message("settings.editor.font.main.weight")), c);
+      internalPanel.add(new JLabel(ApplicationBundle.message("settings.editor.font.main.weight")), c);
       c.gridx = 1;
+      c.insets = JBUI.insets(0, BASE_INSET, 0, 0);
       myRegularWeightCombo = new MyRegularFontWeightCombo();
-      int comboWidth = myRegularWeightCombo.getFontMetrics(myRegularWeightCombo.getFont()).stringWidth(StringUtil.repeat("M", 20));
-      fixComboWidth(myRegularWeightCombo, comboWidth);
+      fixComboWidth(myRegularWeightCombo, JBUI.scale(FONT_WEIGHT_COMBO_WIDTH));
       myRegularWeightCombo.addActionListener(new ActionListener() {
         @Override
         public void actionPerformed(ActionEvent e) {
@@ -128,11 +148,12 @@ public class AppEditorFontOptionsPanel extends AbstractFontOptionsPanel {
             });
         }
       });
-      typographyPanel.add(myRegularWeightCombo, c);
+      internalPanel.add(myRegularWeightCombo, c);
       c.gridy ++;
       c.gridx = 0;
-      typographyPanel.add(new JLabel(ApplicationBundle.message("settings.editor.font.bold.weight")), c);
+      internalPanel.add(new JLabel(ApplicationBundle.message("settings.editor.font.bold.weight")), c);
       c.gridx = 1;
+      c.insets = getInsets(0, 0);
       myBoldWeightCombo = new MyBoldFontWeightCombo();
       myBoldWeightCombo.addActionListener(new ActionListener() {
         @Override
@@ -141,17 +162,29 @@ public class AppEditorFontOptionsPanel extends AbstractFontOptionsPanel {
             preferences -> preferences.setBoldSubFamily(myBoldWeightCombo.getSelectedSubFamily()));
         }
       });
-      fixComboWidth(myBoldWeightCombo, comboWidth);
-      typographyPanel.add(myBoldWeightCombo, c);
+      fixComboWidth(myBoldWeightCombo, JBUI.scale(FONT_WEIGHT_COMBO_WIDTH));
+      internalPanel.add(myBoldWeightCombo, c);
       c.gridy ++;
       JLabel boldHintLabel = new JLabel(ApplicationBundle.message("settings.editor.font.bold.weight.hint"));
       boldHintLabel.setFont(JBUI.Fonts.smallFont());
       boldHintLabel.setForeground(UIUtil.getContextHelpForeground());
-      typographyPanel.add(boldHintLabel, c);
+      internalPanel.add(boldHintLabel, c);
       c.gridy ++;
     }
     c.gridx = 0;
-    createSecondaryFontComboAndLabel(typographyPanel, c);
+    createSecondaryFontComboAndLabel(internalPanel, c);
+    internalPanel.setVisible(false);
+    typographyPanel.add(internalPanel, BorderLayout.CENTER);
+
+    arrowLabel.addMouseListener(
+      new MouseAdapter() {
+        @Override
+        public void mouseClicked(MouseEvent e) {
+          internalPanel.setVisible(!internalPanel.isVisible());
+          arrowLabel.setIcon(internalPanel.isVisible() ? AllIcons.General.ArrowDown : AllIcons.General.ArrowRight);
+        }
+      }
+    );
     return typographyPanel;
   }
 
@@ -166,13 +199,21 @@ public class AppEditorFontOptionsPanel extends AbstractFontOptionsPanel {
     updateOnChangedFont();
   }
 
+
+  @NotNull
+  private ActionLink createRestoreLabel() {
+    return new ActionLink(ApplicationBundle.message("settings.editor.font.restored.defaults"), e -> {
+      restoreDefaults();
+    });
+  }
+
   public void updateOnChangedFont() {
     updateOptionsList();
     fireFontChanged();
   }
 
   private void updateRestoreButtonState() {
-    myMainPanel.setRestoreLabelEnabled(!myDefaultPreferences.equals(getFontPreferences()));
+    myRestoreLabel.setEnabled(!myDefaultPreferences.equals(getFontPreferences()));
   }
 
   private JPanel createMessagePanel() {
@@ -285,7 +326,7 @@ public class AppEditorFontOptionsPanel extends AbstractFontOptionsPanel {
   }
 
   private static boolean isAdvancedFontFamiliesUI() {
-    return SystemProperties.is("new.editor.font.selector");
+    return AppEditorFontOptions.NEW_FONT_SELECTOR;
   }
 
 

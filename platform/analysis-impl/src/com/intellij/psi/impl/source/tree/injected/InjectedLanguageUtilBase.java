@@ -27,6 +27,7 @@ import com.intellij.reference.SoftReference;
 import com.intellij.testFramework.LightVirtualFile;
 import com.intellij.util.containers.ConcurrentList;
 import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -38,7 +39,10 @@ import java.util.Objects;
  * @deprecated Use {@link InjectedLanguageManager} instead
  */
 @Deprecated
+@ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
 public class InjectedLanguageUtilBase {
+  public static final Key<IElementType> INJECTED_FRAGMENT_TYPE = Key.create("INJECTED_FRAGMENT_TYPE");
+
   @NotNull
   static PsiElement loadTree(@NotNull PsiElement host, @NotNull PsiFile containingFile) {
     if (containingFile instanceof DummyHolder) {
@@ -62,6 +66,34 @@ public class InjectedLanguageUtilBase {
   public static List<TokenInfo> getHighlightTokens(@NotNull PsiFile file) {
     return file.getUserData(HIGHLIGHT_TOKENS);
   }
+
+  public static String getUnescapedText(@NotNull PsiFile file, @Nullable final PsiElement startElement, @Nullable final PsiElement endElement) {
+    final InjectedLanguageManager manager = InjectedLanguageManager.getInstance(file.getProject());
+    if (manager.getInjectionHost(file) == null) {
+      return file.getText().substring(startElement == null ? 0 : startElement.getTextRange().getStartOffset(),
+                                      endElement == null ? file.getTextLength() : endElement.getTextRange().getStartOffset());
+    }
+    final StringBuilder sb = new StringBuilder();
+    file.accept(new PsiRecursiveElementWalkingVisitor() {
+
+      Boolean myState = startElement == null ? Boolean.TRUE : null;
+
+      @Override
+      public void visitElement(@NotNull PsiElement element) {
+        if (element == startElement) myState = Boolean.TRUE;
+        if (element == endElement) myState = Boolean.FALSE;
+        if (Boolean.FALSE == myState) return;
+        if (Boolean.TRUE == myState && element.getFirstChild() == null) {
+          sb.append(getUnescapedLeafText(element, false));
+        }
+        else {
+          super.visitElement(element);
+        }
+      }
+    });
+    return sb.toString();
+  }
+
   public static class TokenInfo {
     @NotNull public final IElementType type;
     @NotNull public final ProperTextRange rangeInsideInjectionHost;
@@ -399,6 +431,7 @@ public class InjectedLanguageUtilBase {
    */
   @NotNull
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static ConcurrentList<DocumentWindow> getCachedInjectedDocuments(@NotNull PsiFile hostPsiFile) {
     // modification of cachedInjectedDocuments must be under InjectedLanguageManagerImpl.ourInjectionPsiLock only
     List<DocumentWindow> injected = hostPsiFile.getUserData(INJECTED_DOCS_KEY);
@@ -503,6 +536,7 @@ public class InjectedLanguageUtilBase {
    * @deprecated Use {@link InjectedLanguageManager#getInjectedPsiFiles(PsiElement)} != null instead
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static boolean hasInjections(@NotNull PsiLanguageInjectionHost host) {
     if (!host.isPhysical()) return false;
     final Ref<Boolean> result = Ref.create(false);

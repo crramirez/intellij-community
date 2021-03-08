@@ -1,8 +1,9 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.externalSystem.autoimport
 
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzerSettings
 import com.intellij.ide.file.BatchFileChangeListener
+import com.intellij.ide.impl.getTrustedState
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.PersistentStateComponent
@@ -17,14 +18,17 @@ import com.intellij.openapi.externalSystem.autoimport.ProjectStatus.Modification
 import com.intellij.openapi.externalSystem.autoimport.ProjectStatus.ModificationType.INTERNAL
 import com.intellij.openapi.externalSystem.autoimport.update.PriorityEatUpdate
 import com.intellij.openapi.externalSystem.model.ProjectSystemId
+import com.intellij.openapi.externalSystem.util.ExternalSystemUtil
 import com.intellij.openapi.observable.operations.AnonymousParallelOperationTrace
 import com.intellij.openapi.observable.operations.CompoundParallelOperationTrace
 import com.intellij.openapi.observable.properties.AtomicBooleanProperty
 import com.intellij.openapi.observable.properties.BooleanProperty
+import com.intellij.openapi.progress.impl.CoreProgressManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.registry.Registry
 import com.intellij.util.LocalTimeCounter.currentTime
+import com.intellij.util.ThreeState
 import com.intellij.util.concurrency.AppExecutorUtil
 import com.intellij.util.ui.update.MergingUpdateQueue
 import com.intellij.util.ui.update.Update
@@ -41,7 +45,10 @@ class AutoImportProjectTracker(private val project: Project) : ExternalSystemPro
   private val projectStates = ConcurrentHashMap<State.Id, State.Project>()
   private val projectDataMap = ConcurrentHashMap<ExternalSystemProjectId, ProjectData>()
   private val isDisabled = AtomicBooleanProperty(isDisabledAutoReload.get())
-  private val asyncChangesProcessingProperty = AtomicBooleanProperty(!ApplicationManager.getApplication().isHeadlessEnvironment)
+  private val asyncChangesProcessingProperty = AtomicBooleanProperty(
+    !ApplicationManager.getApplication().isHeadlessEnvironment
+    || CoreProgressManager.shouldKeepTasksAsynchronousInHeadlessMode()
+  )
   private val projectChangeOperation = AnonymousParallelOperationTrace(debugName = "Project change operation")
   private val projectRefreshOperation = CompoundParallelOperationTrace<String>(debugName = "Project refresh operation")
   private val dispatcher = MergingUpdateQueue("AutoImportProjectTracker.dispatcher", AUTO_REPARSE_DELAY, false, null, project)
@@ -121,24 +128,26 @@ class AutoImportProjectTracker(private val project: Project) : ExternalSystemPro
     if (isDisabled.get() || Registry.`is`("external.system.auto.import.disabled")) return
     if (!projectChangeOperation.isOperationCompleted()) return
     if (smart && !projectRefreshOperation.isOperationCompleted()) return
-    var isSkippedProjectRefresh = true
-    for (projectData in projectDataMap.values) {
-      val projectId = projectData.projectAware.projectId.readableName
-      val isAllowAutoReload = !smart || projectData.isActivated
-      if (isAllowAutoReload && !projectData.isUpToDate()) {
-        isSkippedProjectRefresh = false
-        LOG.debug("$projectId: Project refresh")
-        val hasUndefinedModifications = !projectData.status.isUpToDate()
-        val settingsContext = projectData.settingsTracker.getSettingsContext()
-        val context = ProjectReloadContext(!smart, hasUndefinedModifications, settingsContext)
-        projectData.projectAware.reloadProject(context)
-      }
-      else {
-        LOG.debug("$projectId: Skip project refresh")
-      }
-    }
-    if (isSkippedProjectRefresh) {
+
+    val projectsToReload = projectDataMap.values
+      .filter { (!smart || it.isActivated) && !it.isUpToDate() }
+
+    if (projectsToReload.isEmpty()) {
+      LOG.debug("Skipped all projects reload")
       updateProjectNotification()
+      return
+    }
+
+    val systemIds = projectsToReload.map { it.projectAware.projectId.systemId }
+    val isFirstLoad = ThreeState.UNSURE == project.getTrustedState()
+    ExternalSystemUtil.confirmLoadingUntrustedProject(project, isFirstLoad, systemIds)
+
+    for (projectData in projectsToReload) {
+      LOG.debug("${projectData.projectAware.projectId.readableName}: Project reload")
+      val hasUndefinedModifications = !projectData.status.isUpToDate()
+      val settingsContext = projectData.settingsTracker.getSettingsContext()
+      val context = ProjectReloadContext(!smart, hasUndefinedModifications, settingsContext)
+      projectData.projectAware.reloadProject(context)
     }
   }
 
@@ -323,7 +332,7 @@ class AutoImportProjectTracker(private val project: Project) : ExternalSystemPro
   ) : ExternalSystemProjectReloadContext
 
   companion object {
-    private val LOG = Logger.getInstance("#com.intellij.openapi.externalSystem.autoimport")
+    val LOG = Logger.getInstance("#com.intellij.openapi.externalSystem.autoimport")
 
     @TestOnly
     @JvmStatic
@@ -332,7 +341,7 @@ class AutoImportProjectTracker(private val project: Project) : ExternalSystemPro
     }
 
     private val isDisabledAutoReload = AtomicBooleanProperty(
-      ApplicationManager.getApplication().isUnitTestMode || Registry.`is`("external.system.auto.import.disabled")
+      ApplicationManager.getApplication().isUnitTestMode
     )
 
     @TestOnly

@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.options.newEditor;
 
 import com.intellij.icons.AllIcons;
@@ -810,6 +810,15 @@ public class SettingsTreeView extends JComponent implements Accessible, Disposab
   }
 
   private static final class MyTreeUi extends WideSelectionTreeUI {
+    @Override
+    public Rectangle getPathBounds(JTree tree, TreePath path) {
+      Rectangle bounds = super.getPathBounds(tree, path);
+      if (bounds != null) {
+        bounds.width = Math.max(bounds.width, tree.getWidth() - bounds.x);
+      }
+      return bounds;
+    }
+
     boolean processMouseEvent(MouseEvent event) {
       if (tree instanceof SimpleTree) {
         SimpleTree tree = (SimpleTree)super.tree;
@@ -878,9 +887,8 @@ public class SettingsTreeView extends JComponent implements Accessible, Disposab
                             boolean isLeaf) {
       if (tree != null) {
         bounds.width = tree.getWidth();
-        Container parent = tree.getParent();
-        if (parent instanceof JViewport) {
-          JViewport viewport = (JViewport)parent;
+        JViewport viewport = ComponentUtil.getViewport(tree);
+        if (viewport != null) {
           bounds.width = viewport.getWidth() - viewport.getViewPosition().x - insets.right / 2;
         }
         bounds.width -= bounds.x;

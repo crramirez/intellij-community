@@ -34,13 +34,10 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
-import javax.swing.table.AbstractTableModel;
-import javax.swing.table.TableCellEditor;
-import javax.swing.table.TableCellRenderer;
-import javax.swing.table.TableColumn;
+import javax.swing.table.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
-import java.awt.event.KeyAdapter;
+import java.awt.event.ActionListener;
 import java.awt.event.KeyEvent;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
@@ -108,9 +105,10 @@ public class RegistryUi implements Disposable {
       public void valueChanged(@NotNull ListSelectionEvent e) {
         if (e.getValueIsAdjusting()) return;
 
-        final int selected = myTable.getSelectedRow();
-        if (selected != -1) {
-          final RegistryValue value = myModel.getRegistryValue(selected);
+        int viewRow = myTable.getSelectedRow();
+        if (viewRow != -1) {
+          int modelRow = myTable.convertRowIndexToModel(viewRow);
+          RegistryValue value = myModel.getRegistryValue(modelRow);
           String description = value.getDescription();
           if (value.isRestartRequired()) {
             myDescriptionLabel.setText(description + "\n" + IdeBundle.message("registry.key.requires.ide.restart.note"));
@@ -135,25 +133,27 @@ public class RegistryUi implements Disposable {
 
     myContent.add(tb.getComponent(), BorderLayout.NORTH);
     final TableSpeedSearch search = new TableSpeedSearch(myTable);
-    search.setComparator(new SpeedSearchComparator(false));
-    myTable.addKeyListener(new KeyAdapter() {
-      @Override
-      public void keyPressed(@NotNull KeyEvent e) {
-        if (e.getKeyCode() == KeyEvent.VK_SPACE) {
-          int row = myTable.getSelectedRow();
-          if (row != -1) {
-            RegistryValue rv = myModel.getRegistryValue(row);
+    search.setFilteringMode(true);
+    myTable.setRowSorter(new TableRowSorter<>(myTable.getModel()));
+    myTable.registerKeyboardAction(
+      new ActionListener() {
+        @Override
+        public void actionPerformed(ActionEvent e) {
+          int[] rows = myTable.getSelectedRows();
+          if (rows.length == 0) return;
+          for (int row : rows) {
+            int modelRow = myTable.convertRowIndexToModel(row);
+            RegistryValue rv = myModel.getRegistryValue(modelRow);
             if (rv.isBoolean()) {
               setValue(rv, !rv.asBoolean());
               keyChanged(rv.getKey());
-              for (int i : new int[]{0, 1, 2}) myModel.fireTableCellUpdated(row, i);
-              invalidateActions();
-              if (search.isPopupActive()) search.hidePopup();
+              for (int i : new int[]{0, 1, 2}) myModel.fireTableCellUpdated(modelRow, i);
             }
           }
+          invalidateActions();
         }
-      }
-    });
+      },
+      KeyStroke.getKeyStroke(KeyEvent.VK_SPACE, 0), JComponent.WHEN_FOCUSED);
   }
 
   private final class RevertAction extends AnAction {
@@ -169,14 +169,14 @@ public class RegistryUi implements Disposable {
       e.getPresentation().setIcon(AllIcons.General.Reset);
 
       if (e.getPresentation().isEnabled()) {
-        final RegistryValue rv = myModel.getRegistryValue(myTable.getSelectedRow());
+        RegistryValue rv = myModel.getRegistryValue(myTable.convertRowIndexToModel(myTable.getSelectedRow()));
         e.getPresentation().setEnabled(rv.isChangedFromDefault());
       }
     }
 
     @Override
     public void actionPerformed(@NotNull AnActionEvent e) {
-      final RegistryValue rv = myModel.getRegistryValue(myTable.getSelectedRow());
+      final RegistryValue rv = myModel.getRegistryValue(myTable.convertRowIndexToModel(myTable.getSelectedRow()));
       rv.resetToDefault();
       myModel.fireTableCellUpdated(myTable.getSelectedRow(), 0);
       myModel.fireTableCellUpdated(myTable.getSelectedRow(), 1);
@@ -435,7 +435,8 @@ public class RegistryUi implements Disposable {
                                                    boolean hasFocus,
                                                    int row,
                                                    int column) {
-      final RegistryValue v = ((MyTableModel)table.getModel()).getRegistryValue(row);
+      int modelRow = table.convertRowIndexToModel(row);
+      RegistryValue v = ((MyTableModel)table.getModel()).getRegistryValue(modelRow);
 
       Color bg = isSelected ? table.getSelectionBackground() : table.getBackground();
 
@@ -486,6 +487,7 @@ public class RegistryUi implements Disposable {
                 myComponent.append(" [" + Registry.getInstance().getBundleValue(v.getKey(), false) + "]",
                                    SimpleTextAttributes.GRAYED_ATTRIBUTES);
               }
+              SpeedSearchUtil.applySpeedSearchHighlighting(table, myComponent, true, hasFocus);
               return myComponent;
             }
         }
@@ -535,10 +537,15 @@ public class RegistryUi implements Disposable {
     private ComboBox<String> myComboBox;
     private RegistryValue myValue;
 
+    {
+      myCheckBox.addActionListener(e -> stopCellEditing());
+    }
+
     @Override
     @Nullable
     public Component getTableCellEditorComponent(JTable table, Object value, boolean isSelected, int row, int column) {
-      myValue = ((MyTableModel)table.getModel()).getRegistryValue(row);
+      int modelRow = table.convertRowIndexToModel(row);
+      myValue = ((MyTableModel)table.getModel()).getRegistryValue(modelRow);
       if (myValue.asColor(null) != null) {
         final Color color = ColorChooser.chooseColor(table, IdeBundle.message("dialog.title.choose.color"), myValue.asColor(Color.WHITE));
         if (color != null) {
@@ -546,15 +553,18 @@ public class RegistryUi implements Disposable {
           keyChanged(myValue.getKey());
         }
         return null;
-      } else if (myValue.isBoolean()) {
+      }
+      else if (myValue.isBoolean()) {
         myCheckBox.setSelected(myValue.asBoolean());
         myCheckBox.setBackground(table.getBackground());
         return myCheckBox;
-      } else if (myValue.isMultiValue()) {
+      }
+      else if (myValue.isMultiValue()) {
         myComboBox = new ComboBox<>(getOptions(myValue));
         myComboBox.setSelectedItem(myValue.getSelectedOption());
         return myComboBox;
-      } else {
+      }
+      else {
         myField.setText(myValue.asString());
         myField.setBorder(null);
         myField.selectAll();
@@ -567,10 +577,12 @@ public class RegistryUi implements Disposable {
       if (myValue != null) {
         if (myValue.isBoolean()) {
           setValue(myValue, myCheckBox.isSelected());
-        } else if (myValue.isMultiValue()) {
+        }
+        else if (myValue.isMultiValue()) {
           String selected = (String)myComboBox.getSelectedItem();
           myValue.setSelectedOption(selected);
-        } else {
+        }
+        else {
           setValue(myValue, myField.getText().trim());
         }
         keyChanged(myValue.getKey());

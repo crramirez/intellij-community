@@ -135,6 +135,16 @@ public class ActionPopupStep implements ListPopupStepEx<PopupFactoryImpl.ActionI
   }
 
   @Override
+  public @Nullable String getMnemonicString(PopupFactoryImpl.ActionItem value) {
+    if (value.digitMnemonicsEnabled()) {
+      Character res = value.getMnemonicChar();
+      return res != null ? res.toString() : null;
+    }
+
+    return MnemonicNavigationFilter.super.getMnemonicString(value);
+  }
+
+  @Override
   public Icon getIconFor(final PopupFactoryImpl.ActionItem aValue) {
     return aValue.getIcon(false);
   }
@@ -209,6 +219,14 @@ public class ActionPopupStep implements ListPopupStepEx<PopupFactoryImpl.ActionI
     }
   }
 
+  @Override
+  public boolean isFinal(PopupFactoryImpl.ActionItem value) {
+    if (!value.isEnabled()) return true;
+    final AnAction action = value.getAction();
+    final DataContext dataContext = myContext.get();
+    return !(action instanceof ActionGroup) || ((ActionGroup)action).canBePerformed(dataContext);
+  }
+
   public void performAction(@NotNull AnAction action, int modifiers) {
     performAction(action, modifiers, null);
   }
@@ -220,7 +238,7 @@ public class ActionPopupStep implements ListPopupStepEx<PopupFactoryImpl.ActionI
       ActionManager.getInstance(), modifiers);
     event.setInjectedContext(action.isInInjectedContext());
     if (ActionUtil.lastUpdateAndCheckDumb(action, event, false)) {
-      ActionUtil.performActionDumbAwareWithCallbacks(action, event, dataContext);
+      ActionUtil.performActionDumbAwareWithCallbacks(action, event);
     }
   }
 

@@ -22,6 +22,11 @@
               topic="com.intellij.openapi.fileEditor.FileEditorManagerListener"/>
   </projectListeners>
 
+  <applicationListeners>
+    <listener class="training.statistic.LearnProjectStateListener"
+              topic="com.intellij.openapi.project.ProjectManagerListener"/>
+  </applicationListeners>
+
   <extensionPoints>
     <extensionPoint name="ift.language.extension"
                     beanClass="com.intellij.lang.LanguageExtensionPoint" dynamic="true">
@@ -29,17 +34,26 @@
     </extensionPoint>
 
     <extensionPoint name="ift.learning.course" beanClass="com.intellij.lang.LanguageExtensionPoint" dynamic="true">
-      <with attribute="implementationClass" implements="training.learn.LearningCourse"/>
+      <with attribute="implementationClass" implements="training.learn.course.LearningCourse"/>
     </extensionPoint>
   </extensionPoints>
 
   <extensions defaultExtensionNs="com.intellij">
-    <!-- groupId should be same to StatisticBase.GROUP_ID and version to StatisticBase.VERSION -->
-    <statistics.counterUsagesCollector groupId="ideFeaturesTrainer" version="5"/>
     <statistics.validation.customValidationRule
       implementation="training.statistic.IdeFeaturesTrainerRuleValidator"/>
     <statistics.validation.customValidationRule
       implementation="training.statistic.IdeFeaturesTrainerModuleRuleValidator"/>
+    <statistics.validation.customValidationRule
+      implementation="training.statistic.SupportedLanguageRuleValidator"/>
+    <statistics.validation.customValidationRule
+      implementation="training.statistic.ActionIdRuleValidator"/>
+    <statistics.validation.customValidationRule
+      implementation="training.statistic.TaskIdRuleValidator"/>
+    <statistics.validation.customValidationRule
+      implementation="training.statistic.KeymapSchemeRuleValidator"/>
+    <statistics.counterUsagesCollector implementationClass="training.statistic.StatisticBase"/>
+    <applicationService
+      serviceImplementation="training.statistic.LearnProjectState"/>
 
     <interactiveCourseFactory id="IFTInteractiveCourse" implementation="training.ui.welcomeScreen.IFTInteractiveCourse" order="first"/>
 
@@ -51,8 +65,6 @@
       serviceImplementation="training.ui.UISettings"/>
     <applicationService
       serviceImplementation="training.learn.lesson.LessonStateBase"/>
-    <applicationService
-      serviceImplementation="training.statistic.StatisticBase"/>
     <toolWindow id="Learn"
                 canCloseContents="true"
                 icon="FeaturesTrainerIcons.Img.FeatureTrainerToolWindow"
@@ -100,6 +112,10 @@
                  restartRequired="false"/>
     <registryKey key="ift.show.feedback.link"
                  description="Whether IFT show feedback link in the modules panel."
+                 defaultValue="TRUE"
+                 restartRequired="false"/>
+    <registryKey key="ift.use.scroll.animation"
+                 description="Use scroll animation in IFT lessons."
                  defaultValue="TRUE"
                  restartRequired="false"/>
   </extensions>

@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.vcs.log.ui.table;
 
 import com.google.common.primitives.Ints;
@@ -176,7 +176,7 @@ public class VcsLogGraphTable extends TableWithProgress implements DataProvider,
   }
 
   protected void appendActionToEmptyText(@Nls @NotNull String text, @NotNull Runnable action) {
-    getEmptyText().appendSecondaryText(text, VcsLogUiUtil.getLinkAttributes(), e -> action.run());
+    getEmptyText().appendSecondaryText(text, SimpleTextAttributes.LINK_PLAIN_ATTRIBUTES, e -> action.run());
   }
 
   public void updateDataPack(@NotNull VisiblePack visiblePack, boolean permGraphChanged) {
@@ -267,7 +267,7 @@ public class VcsLogGraphTable extends TableWithProgress implements DataProvider,
   }
 
   private void resetColumnWidth(@NotNull VcsLogColumn<?> column) {
-    VcsLogUsageTriggerCollector.triggerUsage(VcsLogUsageTriggerCollector.VcsLogEvent.COLUMN_RESET, null);
+    VcsLogUsageTriggerCollector.triggerUsage(VcsLogUsageTriggerCollector.VcsLogEvent.COLUMN_RESET, null, myLogData.getProject());
     if (VcsLogColumnUtilKt.getWidth(column, myProperties) != -1) {
       setWidth(column, myProperties, -1);
     }
@@ -483,11 +483,11 @@ public class VcsLogGraphTable extends TableWithProgress implements DataProvider,
     return myProperties.exists(CommonUiProperties.SHOW_ROOT_NAMES) && myProperties.get(CommonUiProperties.SHOW_ROOT_NAMES);
   }
 
-  public void jumpToRow(int rowIndex) {
+  public void jumpToRow(int rowIndex, boolean focus) {
     if (rowIndex >= 0 && rowIndex <= getRowCount() - 1) {
       scrollRectToVisible(getCellRect(rowIndex, 0, false));
       setRowSelectionInterval(rowIndex, rowIndex);
-      if (!hasFocus()) {
+      if (focus && !hasFocus()) {
         IdeFocusManager.getInstance(myLogData.getProject()).requestFocus(this, true);
       }
     }
@@ -523,7 +523,7 @@ public class VcsLogGraphTable extends TableWithProgress implements DataProvider,
 
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < Math.min(VcsLogUtil.MAX_SELECTED_COMMITS, selectedRows.length); i++) {
-          sb.append(getModel().getValueAt(selectedRows[i], Commit.INSTANCE).toString());
+          sb.append(getModel().getValueAt(selectedRows[i], Commit.INSTANCE));
           if (i != selectedRows.length - 1) sb.append("\n");
         }
         return sb.toString();
@@ -786,9 +786,7 @@ public class VcsLogGraphTable extends TableWithProgress implements DataProvider,
     @NotNull
     public VcsCommitStyle getBaseStyle(int row, int column, boolean hasFocus, boolean selected) {
       Component dummyRendererComponent = myDummyRenderer.getTableCellRendererComponent(myTable, "", selected, hasFocus, row, column);
-      Color background = selected
-                         ? myTable.hasFocus() ? UIUtil.getListSelectionBackground(true) : UIUtil.getListSelectionBackground(false)
-                         : UIUtil.getListBackground();
+      Color background = selected ? UIUtil.getListSelectionBackground(myTable.hasFocus()) : UIUtil.getListBackground();
       return createStyle(dummyRendererComponent.getForeground(), background, VcsLogHighlighter.TextStyle.NORMAL);
     }
   }

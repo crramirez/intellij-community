@@ -39,7 +39,7 @@ public abstract class AbstractChopListAction<L extends PsiElement, E extends Psi
       }
     }
     E first = elements.get(0);
-    if (needHeadBreak(first)){
+    if (needHeadBreak(first)) {
       document.insertString(findOffsetOfBreakBeforeFirst(first), "\n");
     }
     PsiDocumentManager documentManager = PsiDocumentManager.getInstance(project);

@@ -104,6 +104,7 @@ public class ControlFlowAnalyzer extends JavaElementVisitor {
 
   public @Nullable ControlFlow buildControlFlow() {
     myCurrentFlow = new ControlFlow(myFactory);
+    addInstruction(new FinishElementInstruction(null)); // to initialize LVA
     try {
       if(myCodeFragment instanceof PsiClass) {
         // if(unknown) { staticInitializer(); } else { instanceInitializer(); }
@@ -616,16 +617,16 @@ public class ControlFlowAnalyzer extends JavaElementVisitor {
       body.accept(this);
     }
 
-    if (!addCountingLoopBound(statement)) {
+    ControlFlowOffset offset = initialization != null ? getEndOffset(initialization) : getStartOffset(statement);
+
+    if (!addCountingLoopBound(statement, offset)) {
       PsiStatement update = statement.getUpdate();
       if (update != null) {
         update.accept(this);
       }
+      addInstruction(new GotoInstruction(offset));
     }
 
-    ControlFlowOffset offset = initialization != null ? getEndOffset(initialization) : getStartOffset(statement);
-
-    addInstruction(new GotoInstruction(offset));
     finishElement(statement);
 
     for (PsiElement declaredVariable : declaredVariables) {
@@ -651,8 +652,9 @@ public class ControlFlowAnalyzer extends JavaElementVisitor {
    * Does nothing if the statement is not a counting loop.
    *
    * @param statement counting loop candidate.
+   * @param startOffset loop start offset (jump target for back-branch)
    */
-  private boolean addCountingLoopBound(PsiForStatement statement) {
+  private boolean addCountingLoopBound(PsiForStatement statement, ControlFlowOffset startOffset) {
     CountingLoop loop = CountingLoop.from(statement);
     if (loop == null || loop.isDescending()) return false;
     PsiLocalVariable counter = loop.getCounter();
@@ -682,12 +684,9 @@ public class ControlFlowAnalyzer extends JavaElementVisitor {
     DfaVariableValue loopVar = myFactory.getVarFactory().createVariableValue(counter);
     if(diff >= 0 && diff <= MAX_UNROLL_SIZE) {
       // Unroll small loops
-      addInstruction(new PushInstruction(loopVar, null, true));
-      addInstruction(new PushInstruction(loopVar, null));
-      addInstruction(new PushValueInstruction(DfTypes.intValue(1)));
-      addInstruction(new BinopInstruction(JavaTokenType.PLUS, null, loopVar.getType(), -1, true));
-      addInstruction(new AssignInstruction(null, null));
-      addInstruction(new PopInstruction());
+      Objects.requireNonNull(statement.getUpdate()).accept(this);
+      addInstruction(new GotoInstruction(startOffset, false));
+      return true;
     }
     else if (start != null) {
       long maxValue = end == null ? Long.MAX_VALUE : loop.isIncluding() ? end + 1 : end;
@@ -709,6 +708,7 @@ public class ControlFlowAnalyzer extends JavaElementVisitor {
                           .compare(JavaTokenType.LE);
       addInstruction(new ConditionalGotoInstruction(getEndOffset(statement), false, null));
     }
+    addInstruction(new GotoInstruction(startOffset));
     return true;
   }
 
@@ -720,23 +720,29 @@ public class ControlFlowAnalyzer extends JavaElementVisitor {
     PsiStatement thenStatement = statement.getThenBranch();
     PsiStatement elseStatement = statement.getElseBranch();
 
-    ControlFlowOffset offset = elseStatement != null ? getStartOffset(elseStatement) : getEndOffset(statement);
+    ControlFlow.DeferredOffset skipThenOffset = new ControlFlow.DeferredOffset();
 
     if (condition != null) {
       condition.accept(this);
       generateBoxingUnboxingInstructionFor(condition, PsiType.BOOLEAN);
-      addInstruction(new ConditionalGotoInstruction(offset, true, condition));
+      addInstruction(new ConditionalGotoInstruction(skipThenOffset, true, condition));
     }
 
     if (thenStatement != null) {
+      addInstruction(new FinishElementInstruction(null));
       thenStatement.accept(this);
     }
 
     if (elseStatement != null) {
-      offset = getEndOffset(statement);
-      Instruction instruction = new GotoInstruction(offset);
+      ControlFlow.DeferredOffset skipElseOffset = new ControlFlow.DeferredOffset();
+      Instruction instruction = new GotoInstruction(skipElseOffset);
       addInstruction(instruction);
+      skipThenOffset.setOffset(getInstructionCount());
+      addInstruction(new FinishElementInstruction(null));
       elseStatement.accept(this);
+      skipElseOffset.setOffset(getInstructionCount());
+    } else {
+      skipThenOffset.setOffset(getInstructionCount());
     }
 
     finishElement(statement);
@@ -777,10 +783,13 @@ public class ControlFlowAnalyzer extends JavaElementVisitor {
         if (PsiUtil.isJvmLocalVariable(target)) {
           variables.add((PsiVariable)target);
         }
-        if (target instanceof PsiMember && !((PsiMember)target).hasModifierProperty(PsiModifier.STATIC)) {
-          DfaValue qualifier = getFactory().getExpressionFactory().getQualifierOrThisValue(expression);
-          if (qualifier instanceof DfaVariableValue) {
-            escapedVars.add((DfaVariableValue)qualifier);
+        if (target instanceof PsiMember) {
+          DfaValue escapedVar = getFactory().getExpressionFactory().getQualifierOrThisValue(expression);
+          if (escapedVar == null) {
+            escapedVar = getFactory().createValue(expression);
+          }
+          if (escapedVar instanceof DfaVariableValue) {
+            escapedVars.add((DfaVariableValue)escapedVar);
           }
         }
       }
@@ -1346,7 +1355,7 @@ public class ControlFlowAnalyzer extends JavaElementVisitor {
       generateShortCircuitAndOr(expression, operands, type, false);
     }
     else {
-      generateBinOp(expression, op, operands, type);
+      generateBinOp(expression, op, operands);
     }
     finishElement(expression);
   }
@@ -1369,7 +1378,7 @@ public class ControlFlowAnalyzer extends JavaElementVisitor {
     ifNonZero.setOffset(myCurrentFlow.getInstructionCount());
   }
 
-  private void generateBinOp(PsiPolyadicExpression expression, IElementType op, PsiExpression[] operands, PsiType type) {
+  private void generateBinOp(PsiPolyadicExpression expression, @NotNull IElementType op, PsiExpression[] operands) {
     PsiExpression lExpr = operands[0];
     lExpr.accept(this);
     PsiType lType = lExpr.getType();
@@ -1378,21 +1387,22 @@ public class ControlFlowAnalyzer extends JavaElementVisitor {
       PsiExpression rExpr = operands[i];
       PsiType rType = rExpr.getType();
 
-      acceptBinaryRightOperand(op, type, lExpr, lType, rExpr, rType);
+      acceptBinaryRightOperand(op, lExpr, lType, rExpr, rType);
       if (isBinaryDivision(op) && rType != null && PsiType.LONG.isAssignableFrom(rType)) {
         Object divisorValue = ExpressionUtils.computeConstantExpression(rExpr);
         if (!(divisorValue instanceof Number) || (((Number)divisorValue).longValue() == 0)) {
           checkZeroDivisor();
         }
       }
-      addInstruction(new BinopInstruction(op, expression, type, i));
+      PsiType resType = TypeConversionUtil.calcTypeForBinaryExpression(lType, rType, op, true);
+      addInstruction(new BinopInstruction(op, expression, resType, i));
 
       lExpr = rExpr;
-      lType = rType;
+      lType = resType;
     }
   }
 
-  private void acceptBinaryRightOperand(@Nullable IElementType op, PsiType type,
+  private void acceptBinaryRightOperand(@NotNull IElementType op,
                                         PsiExpression lExpr, @Nullable PsiType lType,
                                         PsiExpression rExpr, @Nullable PsiType rType) {
     boolean comparing = op == JavaTokenType.EQEQ || op == JavaTokenType.NE;
@@ -1410,27 +1420,26 @@ public class ControlFlowAnalyzer extends JavaElementVisitor {
 
     boolean shift = op == JavaTokenType.GTGT || op == JavaTokenType.LTLT || op == JavaTokenType.GTGTGT;
 
-    PsiType castType;
-    if (comparingPrimitiveNumeric) {
-      castType = TypeConversionUtil.unboxAndBalanceTypes(lType, rType);
+    PsiType leftCast = null;
+    PsiType rightCast = null;
+    if (comparingObjectAndPrimitive) {
+      leftCast = rightCast = TypeConversionUtil.isNumericType(lType) ? rType : lType;
     }
-    else if (comparingObjectAndPrimitive) {
-      castType = TypeConversionUtil.isNumericType(lType) ? rType : lType;
+    else if (shift) {
+      leftCast = PsiType.LONG.equals(PsiPrimitiveType.getOptionallyUnboxedType(lType)) ? PsiType.LONG : PsiType.INT;
+      rightCast = PsiType.LONG.equals(PsiPrimitiveType.getOptionallyUnboxedType(rType)) ? PsiType.LONG : PsiType.INT;
     }
-    else if (shift && PsiType.LONG.equals(rType)) {
-      castType = rType;
-    }
-    else {
-      castType = type;
+    else if (!comparingRef) {
+      leftCast = rightCast = TypeConversionUtil.unboxAndBalanceTypes(lType, rType);
     }
 
-    if (!comparingRef) {
-      generateBoxingUnboxingInstructionFor(lExpr,castType);
+    if (leftCast != null) {
+      generateBoxingUnboxingInstructionFor(lExpr, leftCast);
     }
 
     rExpr.accept(this);
-    if (!comparingRef) {
-      generateBoxingUnboxingInstructionFor(rExpr, castType);
+    if (rightCast != null) {
+      generateBoxingUnboxingInstructionFor(rExpr, rightCast);
     }
   }
 
@@ -1456,7 +1465,7 @@ public class ControlFlowAnalyzer extends JavaElementVisitor {
       if (unboxedType != null && !unboxedType.equals(actualType)) {
         addInstruction(new PrimitiveConversionInstruction(unboxedType, null));
       }
-      addInstruction(new BoxingInstruction(boxedType));
+      addInstruction(new WrapSpecialFieldInstruction(DfTypes.typedObject(boxedType, Nullability.NOT_NULL), SpecialField.UNBOX));
     }
     else if (actualType != expectedType &&
              TypeConversionUtil.isPrimitiveAndNotNull(actualType) &&
@@ -1744,13 +1753,6 @@ public class ControlFlowAnalyzer extends JavaElementVisitor {
         initializeArray(arrayInitializer, expression);
         return;
       }
-      DfaVariableValue var = getTargetVariable(expression);
-      if (var == null) {
-        var = createTempVariable(type);
-      }
-      DfaValue length = SpecialField.ARRAY_LENGTH.createValue(getFactory(), var);
-      addInstruction(new PushInstruction(length, null, true));
-      // stack: ... var.length
       final PsiExpression[] dimensions = expression.getArrayDimensions();
       int dims = dimensions.length;
       if (dims > 0) {
@@ -1771,19 +1773,10 @@ public class ControlFlowAnalyzer extends JavaElementVisitor {
       else {
         pushUnknown();
       }
-      // stack: ... var.length actual_size
-      addInstruction(new PushInstruction(var, null, true));
       DfType arrayValue = TypeConstraints.exact(type).asDfType().meet(DfTypes.LOCAL_OBJECT);
-      addInstruction(new PushValueInstruction(arrayValue, expression));
-      addInstruction(new AssignInstruction(expression, var));
-      // stack: ... var.length actual_size var
-      addInstruction(new SpliceInstruction(3, 0, 2, 1));
-      // stack: ... var var.length actual_size
-      addInstruction(new AssignInstruction(null, length));
-      addInstruction(new PopInstruction());
-      // stack: ... var
+      addInstruction(new WrapSpecialFieldInstruction(arrayValue, SpecialField.ARRAY_LENGTH));
 
-      initializeSmallArray((PsiArrayType)type, var, dimensions);
+      initializeSmallArray((PsiArrayType)type, expression, dimensions);
     }
     else {
       PsiExpression qualifier = expression.getQualifier();
@@ -1829,7 +1822,7 @@ public class ControlFlowAnalyzer extends JavaElementVisitor {
     return null;
   }
 
-  private void initializeSmallArray(PsiArrayType type, DfaVariableValue var, PsiExpression[] dimensions) {
+  private void initializeSmallArray(PsiArrayType type, PsiExpression arrayExpression, PsiExpression[] dimensions) {
     if (dimensions.length != 1) return;
     PsiType componentType = type.getComponentType();
     // Ignore objects as they may produce false NPE warnings due to non-perfect loop handling
@@ -1838,6 +1831,13 @@ public class ControlFlowAnalyzer extends JavaElementVisitor {
     if (val instanceof Integer) {
       int lengthValue = (Integer)val;
       if (lengthValue > 0 && lengthValue <= MAX_UNROLL_SIZE) {
+        DfaVariableValue var = getTargetVariable(arrayExpression);
+        if (var == null) {
+          var = createTempVariable(type);
+        }
+        addInstruction(new PushInstruction(var, null, true));
+        addInstruction(new SwapInstruction());
+        addInstruction(new AssignInstruction(null, var));
         for (int i = 0; i < lengthValue; i++) {
           DfaValue value = getFactory().getExpressionFactory().getArrayElementValue(var, i);
           addInstruction(new PushInstruction(value == null ? getFactory().getUnknown() : value, null, true));
@@ -1913,13 +1913,14 @@ public class ControlFlowAnalyzer extends JavaElementVisitor {
     addInstruction(new DupInstruction());
     generateBoxingUnboxingInstructionFor(operand, unboxedType);
     PsiType resultType = TypeConversionUtil.binaryNumericPromotion(unboxedType, PsiType.INT);
-    addInstruction(new PushValueInstruction(DfTypes.intValue(1)));
+    Object addend = TypeConversionUtil.computeCastTo(1, resultType);
+    addInstruction(new PushValueInstruction(DfTypes.constant(addend, resultType)));
     addInstruction(new BinopInstruction(token, null, resultType));
     if (!unboxedType.equals(resultType)) {
       addInstruction(new PrimitiveConversionInstruction(unboxedType, null));
     }
     if (!(operand.getType() instanceof PsiPrimitiveType)) {
-      addInstruction(new BoxingInstruction(operand.getType()));
+      addInstruction(new WrapSpecialFieldInstruction(DfTypes.typedObject(operand.getType(), Nullability.NOT_NULL), SpecialField.UNBOX));
     }
     addInstruction(new AssignInstruction(operand, null, myFactory.createValue(operand)));
     return true;
@@ -1941,26 +1942,28 @@ public class ControlFlowAnalyzer extends JavaElementVisitor {
       }
       else {
         operand.accept(this);
-        PsiType type = expression.getType();
-        PsiPrimitiveType unboxed = PsiPrimitiveType.getUnboxedType(type);
-        generateBoxingUnboxingInstructionFor(operand, unboxed == null ? type : unboxed);
         if (PsiUtil.isIncrementDecrementOperation(expression)) {
           if (!processIncrementDecrement(expression, operand)) {
             pushUnknown();
             addInstruction(new AssignInstruction(operand, null, myFactory.createValue(operand)));
           }
         }
-        else if (expression.getOperationTokenType() == JavaTokenType.EXCL) {
-          addInstruction(new NotInstruction(expression));
-        }
-        else if (expression.getOperationTokenType() == JavaTokenType.MINUS && (PsiType.INT.equals(type) || PsiType.LONG.equals(type))) {
-          addInstruction(new PushValueInstruction(DfTypes.defaultValue(type)));
-          addInstruction(new SwapInstruction());
-          addInstruction(new BinopInstruction(expression.getOperationTokenType(), expression, type));
-        }
         else {
-          addInstruction(new PopInstruction());
-          pushUnknown();
+          PsiType type = expression.getType();
+          PsiPrimitiveType unboxed = PsiPrimitiveType.getUnboxedType(type);
+          generateBoxingUnboxingInstructionFor(operand, unboxed == null ? type : unboxed);
+          if (expression.getOperationTokenType() == JavaTokenType.EXCL) {
+            addInstruction(new NotInstruction(expression));
+          }
+          else if (expression.getOperationTokenType() == JavaTokenType.MINUS && (PsiType.INT.equals(type) || PsiType.LONG.equals(type))) {
+            addInstruction(new PushValueInstruction(DfTypes.defaultValue(type)));
+            addInstruction(new SwapInstruction());
+            addInstruction(new BinopInstruction(expression.getOperationTokenType(), expression, type));
+          }
+          else {
+            addInstruction(new PopInstruction());
+            pushUnknown();
+          }
         }
       }
     }
@@ -2193,7 +2196,7 @@ public class ControlFlowAnalyzer extends JavaElementVisitor {
   static final CallInliner[] INLINERS = {
     new OptionalChainInliner(), new LambdaInliner(),
     new StreamChainInliner(), new MapUpdateInliner(), new AssumeInliner(), new ClassMethodsInliner(),
-    new AssertAllInliner(), new BoxingInliner(), new SimpleMethodInliner(), new CollectionMethodInliner(),
+    new AssertAllInliner(), new BoxingInliner(), new SimpleMethodInliner(),
     new TransformInliner()
   };
 }

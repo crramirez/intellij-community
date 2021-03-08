@@ -37,10 +37,7 @@ import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.ui.popup.ListPopup;
-import com.intellij.openapi.util.Disposer;
-import com.intellij.openapi.util.NlsContexts;
-import com.intellij.openapi.util.Pair;
-import com.intellij.openapi.util.TextRange;
+import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiDocumentManager;
 import com.intellij.psi.PsiElement;
@@ -107,7 +104,7 @@ public class LookupImpl extends LightweightHint implements LookupEx, Disposable,
 
   private final long myCreatedTimestamp;
   private long myStampShown = 0;
-  private boolean myShown = false;
+  protected boolean myShown = false;
   private boolean myHidden = false;
   private boolean mySelectionTouched;
   private LookupFocusDegree myLookupFocusDegree = LookupFocusDegree.FOCUSED;
@@ -147,7 +144,10 @@ public class LookupImpl extends LightweightHint implements LookupEx, Disposable,
     // a new top level frame just got the focus. This is important to prevent screen readers
     // from announcing the title of the top level frame when the list is shown (or hidden),
     // as they usually do when a new top-level frame receives the focus.
-    AccessibleContextUtil.setParent((Component)myList, myEditor.getContentComponent());
+    // This is not relevant on Mac. This breaks JBR a11y on Mac.
+    if (SystemInfoRt.isWindows) {
+      AccessibleContextUtil.setParent(myList, myEditor.getContentComponent());
+    }
 
     myList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
     myList.setBackground(LookupCellRenderer.BACKGROUND_COLOR);
@@ -335,11 +335,11 @@ public class LookupImpl extends LightweightHint implements LookupEx, Disposable,
     return myOffsets.getAdditionalPrefix();
   }
 
-  void fireBeforeAppendPrefix(char c) {
+  public void fireBeforeAppendPrefix(char c) {
     myPrefixChangeListeners.forEach((listener -> listener.beforeAppend(c)));
   }
 
-  void appendPrefix(char c) {
+  public void appendPrefix(char c) {
     checkValid();
     myOffsets.appendPrefix(c);
     myPresentableArranger.prefixChanged(this);
@@ -672,6 +672,10 @@ public class LookupImpl extends LightweightHint implements LookupEx, Disposable,
 
     LookupUsageTracker.trackLookup(myCreatedTimestamp, this);
 
+    return doShowLookup();
+  }
+
+  protected boolean doShowLookup() {
     myAdComponent.showRandomText();
     if (Boolean.TRUE.equals(myEditor.getUserData(AutoPopupController.NO_ADS))) {
       myAdComponent.clearAdvertisements();
@@ -744,7 +748,7 @@ public class LookupImpl extends LightweightHint implements LookupEx, Disposable,
     myEditor.getDocument().addDocumentListener(new DocumentListener() {
       @Override
       public void documentChanged(@NotNull DocumentEvent e) {
-        if (myGuardedChanges == 0 && !myFinishing) {
+        if (canHide()) {
           hideLookup(false);
         }
       }
@@ -761,7 +765,7 @@ public class LookupImpl extends LightweightHint implements LookupEx, Disposable,
     myEditor.getCaretModel().addCaretListener(new CaretListener() {
       @Override
       public void caretPositionChanged(@NotNull CaretEvent e) {
-        if (myGuardedChanges == 0 && !myFinishing) {
+        if (canHide()) {
           hideLookup(false);
         }
       }
@@ -769,7 +773,7 @@ public class LookupImpl extends LightweightHint implements LookupEx, Disposable,
     myEditor.getSelectionModel().addSelectionListener(new SelectionListener() {
       @Override
       public void selectionChanged(@NotNull final SelectionEvent e) {
-        if (myGuardedChanges == 0 && !myFinishing) {
+        if (canHide()) {
           hideLookup(false);
         }
       }
@@ -834,7 +838,11 @@ public class LookupImpl extends LightweightHint implements LookupEx, Disposable,
     }, this);
   }
 
-  protected boolean suppressHidingOnDocumentChanged() {
+  private boolean canHide() {
+    return myGuardedChanges == 0 && !myFinishing && !suppressHidingOnChange();
+  }
+
+  protected boolean suppressHidingOnChange() {
     return false;
   }
 
@@ -1050,7 +1058,7 @@ public class LookupImpl extends LightweightHint implements LookupEx, Disposable,
     synchronized (myUiLock) {
       int lowerItemIndex = myList.getFirstVisibleIndex();
       int higherItemIndex = myList.getLastVisibleIndex();
-      if (lowerItemIndex < 0 || higherItemIndex <= 0) return Collections.emptyList();
+      if (lowerItemIndex < 0 || higherItemIndex < 0) return Collections.emptyList();
 
       return getListModel().toList().subList(lowerItemIndex, Math.min(higherItemIndex + 1, itemsCount));
     }

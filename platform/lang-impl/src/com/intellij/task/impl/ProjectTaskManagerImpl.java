@@ -154,7 +154,7 @@ public final class ProjectTaskManagerImpl extends ProjectTaskManager {
             catch (ProcessCanceledException e) {
               throw e;
             }
-            catch (Exception e) {
+            catch (Throwable e) {
               LOG.error("Broken project task runner: " + runner.getClass().getName(), e);
             }
             return false;
@@ -508,17 +508,6 @@ public final class ProjectTaskManagerImpl extends ProjectTaskManager {
   }
 
   /**
-   * @deprecated use {@link #rebuildAllModules()}
-   */
-  @Override
-  @ApiStatus.ScheduledForRemoval(inVersion = "2020.1")
-  @Deprecated
-  public void rebuildAllModules(@Nullable ProjectTaskNotification callback) {
-    assertUnsupportedOperation(callback);
-    notifyIfNeeded(rebuildAllModules(), callback);
-  }
-
-  /**
    * @deprecated use {@link #build(Module[])}
    */
   @Override
@@ -560,17 +549,6 @@ public final class ProjectTaskManagerImpl extends ProjectTaskManager {
   public void build(ProjectModelBuildableElement @NotNull [] buildableElements, @Nullable ProjectTaskNotification callback) {
     assertUnsupportedOperation(callback);
     notifyIfNeeded(build(buildableElements), callback);
-  }
-
-  /**
-   * @deprecated use {@link #rebuild(ProjectModelBuildableElement[])}
-   */
-  @Override
-  @ApiStatus.ScheduledForRemoval(inVersion = "2020.1")
-  @Deprecated
-  public void rebuild(ProjectModelBuildableElement @NotNull [] buildableElements, @Nullable ProjectTaskNotification callback) {
-    assertUnsupportedOperation(callback);
-    notifyIfNeeded(rebuild(buildableElements), callback);
   }
 
   private static void notifyIfNeeded(@NotNull Promise<Result> promise, @Nullable ProjectTaskNotification callback) {

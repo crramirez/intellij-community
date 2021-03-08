@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.vcs.log.ui;
 
 import com.google.common.util.concurrent.SettableFuture;
@@ -24,12 +24,12 @@ import com.intellij.vcs.log.ui.filter.VcsLogFilterUiEx;
 import com.intellij.vcs.log.ui.frame.MainFrame;
 import com.intellij.vcs.log.ui.frame.VcsLogEditorDiffPreview;
 import com.intellij.vcs.log.ui.highlighters.VcsLogHighlighterFactory;
-import com.intellij.vcs.log.ui.table.GraphTableModel;
 import com.intellij.vcs.log.ui.table.VcsLogGraphTable;
 import com.intellij.vcs.log.ui.table.column.Date;
 import com.intellij.vcs.log.ui.table.column.TableColumnWidthProperty;
 import com.intellij.vcs.log.util.VcsLogUiUtil;
 import com.intellij.vcs.log.util.VcsLogUtil;
+import com.intellij.vcs.log.visible.VisiblePack;
 import com.intellij.vcs.log.visible.VisiblePackRefresher;
 import com.intellij.vcs.log.visible.filters.VcsLogFilterObject;
 import org.jetbrains.annotations.NonNls;
@@ -40,7 +40,6 @@ import javax.swing.*;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 public class VcsLogUiImpl extends AbstractVcsLogUi implements MainVcsLogUi {
   @NonNls private static final String HELP_ID = "reference.changesToolWindow.log";
@@ -106,7 +105,7 @@ public class VcsLogUiImpl extends AbstractVcsLogUi implements MainVcsLogUi {
   @Override
   protected <T> void handleCommitNotFound(@NotNull T commitId,
                                           boolean commitExists,
-                                          @NotNull PairFunction<GraphTableModel, T, Integer> rowGetter) {
+                                          @NotNull PairFunction<? super VisiblePack, ? super T, Integer> rowGetter) {
     if (getFilterUi().getFilters().isEmpty() || !commitExists) {
       super.handleCommitNotFound(commitId, commitExists, rowGetter);
       return;
@@ -117,7 +116,7 @@ public class VcsLogUiImpl extends AbstractVcsLogUi implements MainVcsLogUi {
       @Override
       public void run() {
         getFilterUi().clearFilters();
-        invokeOnChange(() -> jumpTo(commitId, rowGetter, SettableFuture.create(), false),
+        invokeOnChange(() -> jumpTo(commitId, rowGetter, SettableFuture.create(), false, true),
                        pack -> pack.getFilters().isEmpty());
       }
     });
@@ -128,7 +127,7 @@ public class VcsLogUiImpl extends AbstractVcsLogUi implements MainVcsLogUi {
         public void run() {
           MainVcsLogUi ui = projectLog.openLogTab(VcsLogFilterObject.collection());
           if (ui != null) {
-            VcsLogUtil.invokeOnChange(ui, () -> ui.jumpTo(commitId, rowGetter, SettableFuture.create(), false),
+            VcsLogUtil.invokeOnChange(ui, () -> ui.jumpTo(commitId, rowGetter, SettableFuture.create(), false, true),
                                       pack -> pack.getFilters().isEmpty());
           }
         }
@@ -251,7 +250,8 @@ public class VcsLogUiImpl extends AbstractVcsLogUi implements MainVcsLogUi {
         VcsLogHighlighter highlighter = myHighlighters.get(((VcsLogHighlighterProperty)property).getId());
         if ((boolean)myUiProperties.get(property)) {
           getTable().addHighlighter(highlighter);
-        } else {
+        }
+        else {
           getTable().removeHighlighter(highlighter);
         }
         getTable().repaint();

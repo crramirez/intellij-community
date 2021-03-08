@@ -8,8 +8,7 @@ import com.intellij.execution.target.*;
 import com.intellij.execution.target.java.JavaLanguageRuntimeConfiguration;
 import com.intellij.execution.target.local.LocalTargetEnvironment;
 import com.intellij.execution.target.local.LocalTargetEnvironmentFactory;
-import com.intellij.execution.wsl.WSLDistribution;
-import com.intellij.execution.wsl.WslDistributionManager;
+import com.intellij.execution.wsl.WslPath;
 import com.intellij.execution.wsl.target.WslTargetEnvironmentConfiguration;
 import com.intellij.execution.wsl.target.WslTargetEnvironmentFactory;
 import com.intellij.openapi.application.ApplicationManager;
@@ -18,7 +17,6 @@ import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.projectRoots.JdkUtil;
 import com.intellij.openapi.projectRoots.Sdk;
-import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.registry.Registry;
 import org.jetbrains.annotations.NotNull;
@@ -65,7 +63,8 @@ public abstract class JavaCommandLineState extends CommandLineState implements J
   public TargetEnvironmentFactory createCustomTargetEnvironmentFactory() {
     try {
       JavaParameters parameters = getJavaParameters();
-      return checkCreateWslFactory(parameters);
+      WslTargetEnvironmentConfiguration config = checkCreateWslConfiguration(parameters);
+      return config == null ? null : new WslTargetEnvironmentFactory(config);
     }
     catch (ExecutionException e) {
       // ignore
@@ -73,8 +72,7 @@ public abstract class JavaCommandLineState extends CommandLineState implements J
     return null;
   }
 
-  @Nullable
-  private static WslTargetEnvironmentFactory checkCreateWslFactory(JavaParameters parameters) {
+  protected static WslTargetEnvironmentConfiguration checkCreateWslConfiguration(JavaParameters parameters) {
     String path;
     try {
       path = parameters.getJdkPath();
@@ -82,20 +80,24 @@ public abstract class JavaCommandLineState extends CommandLineState implements J
     catch (CantRunException e) {
       return null;
     }
-    Pair<String, @Nullable WSLDistribution> pathInWsl = WslDistributionManager.getInstance().parseWslPath(path);
+    WslPath wslPath = WslPath.parseWindowsUncPath(path);
     Sdk jdk = parameters.getJdk();
-    if (jdk != null && pathInWsl != null && pathInWsl.second != null) {
-      WslTargetEnvironmentConfiguration config = new WslTargetEnvironmentConfiguration(pathInWsl.second);
+    if (jdk != null && wslPath != null) {
+      WslTargetEnvironmentConfiguration config = new WslTargetEnvironmentConfiguration(wslPath.getDistribution());
       JavaLanguageRuntimeConfiguration javaConfig = new JavaLanguageRuntimeConfiguration();
-      javaConfig.setHomePath(pathInWsl.first);
+      javaConfig.setHomePath(wslPath.getLinuxPath());
       String jdkVersionString = jdk.getVersionString();
       if (jdkVersionString != null) {
         javaConfig.setJavaVersionString(jdkVersionString);
       }
       config.addLanguageRuntime(javaConfig);
-      return new WslTargetEnvironmentFactory(config);
+      return config;
     }
     return null;
+  }
+
+  protected boolean shouldPrepareDebuggerConnection() {
+    return true;
   }
 
   @Override
@@ -105,11 +107,12 @@ public abstract class JavaCommandLineState extends CommandLineState implements J
     @NotNull TargetProgressIndicator targetProgressIndicator) throws ExecutionException {
     targetProgressIndicator.addSystemLine(ExecutionBundle.message("progress.text.prepare.target.requirements"));
 
+    myTargetEnvironmentRequest = request;
+
     TargetDebuggerConnection targetDebuggerConnection =
-      TargetDebuggerConnectionUtil.prepareDebuggerConnection(this, request, configuration);
+      shouldPrepareDebuggerConnection() ? TargetDebuggerConnectionUtil.prepareDebuggerConnection(this, request, configuration) : null;
     myTargetDebuggerConnection = targetDebuggerConnection;
 
-    myTargetEnvironmentRequest = request;
     Ref<TargetedCommandLineBuilder> commandLineRef = new Ref<>();
     Ref<ExecutionException> exceptionRef = new Ref<>();
     ApplicationManager.getApplication().invokeAndWait(() -> {

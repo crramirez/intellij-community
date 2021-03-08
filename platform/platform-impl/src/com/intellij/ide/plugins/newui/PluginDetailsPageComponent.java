@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ide.plugins.newui;
 
 import com.intellij.execution.process.ProcessIOExecutorService;
@@ -407,7 +407,7 @@ public class PluginDetailsPageComponent extends MultiPanel {
 
     StyleSheet sheet = kit.getStyleSheet();
     sheet.addRule("ul { margin-left-ltr: 30; margin-right-rtl: 30; }");
-    sheet.addRule("a { color: " + ColorUtil.toHtmlColor(JBUI.CurrentTheme.Link.linkColor()) + "; }");
+    sheet.addRule("a { color: " + ColorUtil.toHtmlColor(JBUI.CurrentTheme.Link.Foreground.ENABLED) + "; }");
     sheet.addRule("h4 { font-weight: bold; }");
     sheet.addRule("strong { font-weight: bold; }");
     sheet.addRule("p { margin-bottom: 6px; }");
@@ -618,6 +618,7 @@ public class PluginDetailsPageComponent extends MultiPanel {
       if (marketplacePlugins != null) {
         return marketplacePlugins.contains(myPlugin.getPluginId().getIdString());
       }
+
       // will get the marketplace plugins ids next time
       ApplicationManager.getApplication().executeOnPooledThread(() -> {
         try {
@@ -865,22 +866,19 @@ public class PluginDetailsPageComponent extends MultiPanel {
   }
 
   private @NotNull SelectionBasedPluginModelAction.EnableDisableAction<PluginDetailsPageComponent> createEnableDisableAction(@NotNull PluginEnableDisableAction action) {
-    return new SelectionBasedPluginModelAction.EnableDisableAction<>(
-      null,
-      myPluginModel,
-      action,
-      List.of(this),
-      PluginDetailsPageComponent::getPlugin
-    );
+    return new SelectionBasedPluginModelAction.EnableDisableAction<>(myPluginModel,
+                                                                     action,
+                                                                     false,
+                                                                     List.of(this),
+                                                                     PluginDetailsPageComponent::getPlugin);
   }
 
   private @NotNull SelectionBasedPluginModelAction.UninstallAction<PluginDetailsPageComponent> createUninstallAction() {
-    return new SelectionBasedPluginModelAction.UninstallAction<>(
-      null,
-      myPluginModel,
-      this,
-      List.of(this),
-      PluginDetailsPageComponent::getPlugin
+    return new SelectionBasedPluginModelAction.UninstallAction<>(myPluginModel,
+                                                                 false,
+                                                                 this,
+                                                                 List.of(this),
+                                                                 PluginDetailsPageComponent::getPlugin
     );
   }
 }

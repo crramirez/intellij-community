@@ -3,6 +3,7 @@ package com.intellij.util;
 
 import com.intellij.openapi.util.Comparing;
 import gnu.trove.Equality;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -25,6 +26,7 @@ public final class ArrayUtil {
   public static final Class[] EMPTY_CLASS_ARRAY = ArrayUtilRt.EMPTY_CLASS_ARRAY;
   public static final long[] EMPTY_LONG_ARRAY = ArrayUtilRt.EMPTY_LONG_ARRAY;
   public static final File[] EMPTY_FILE_ARRAY = ArrayUtilRt.EMPTY_FILE_ARRAY;
+  public static final Runnable[] EMPTY_RUNNABLE_ARRAY = new Runnable[0];
   /**
    * @deprecated use {@link com.intellij.openapi.util.text.Strings#EMPTY_CHAR_SEQUENCE} instead
    */
@@ -530,6 +532,7 @@ public final class ArrayUtil {
    * @deprecated Use {@link Arrays#equals(Object[], Object[], Comparator)}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.2")
   @Contract(pure=true)
   public static <T> boolean equals(T @NotNull [] a1, T @NotNull [] a2, @NotNull Equality<? super T> comparator) {
     //noinspection ArrayEquality
@@ -862,6 +865,12 @@ public final class ArrayUtil {
     return original.length == 0 ? ArrayUtilRt.EMPTY_INT_ARRAY : original.clone();
   }
 
+  @Contract(value = "null -> null; !null -> !null", pure = true)
+  public static byte @Nullable [] copyOf(byte @Nullable [] original) {
+    if (original == null) return null;
+    return original.length == 0 ? ArrayUtilRt.EMPTY_BYTE_ARRAY : original.clone();
+  }
+
   @Contract(pure = true)
   public static <T> T @NotNull [] stripTrailingNulls(T @NotNull [] array) {
     return array.length != 0 && array[array.length-1] == null ? Arrays.copyOf(array, trailingNullsIndex(array)) : array;
@@ -918,6 +927,14 @@ public final class ArrayUtil {
   public static int max(int @NotNull [] values) {
     int max = Integer.MIN_VALUE;
     for (int value : values) {
+      if (value > max) max = value;
+    }
+    return max;
+  }
+  @Contract(pure = true)
+  public static double max(double @NotNull [] values) {
+    double max = Double.NEGATIVE_INFINITY;
+    for (double value : values) {
       if (value > max) max = value;
     }
     return max;

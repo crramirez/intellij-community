@@ -2,6 +2,7 @@
 package com.intellij.openapi.externalSystem.service.internal;
 
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.Experiments;
 import com.intellij.openapi.externalSystem.ExternalSystemManager;
 import com.intellij.openapi.externalSystem.importing.ImportSpec;
 import com.intellij.openapi.externalSystem.importing.ImportSpecImpl;
@@ -18,6 +19,7 @@ import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskState;
 import com.intellij.openapi.externalSystem.model.task.ExternalSystemTaskType;
 import com.intellij.openapi.externalSystem.service.ExternalSystemFacadeManager;
 import com.intellij.openapi.externalSystem.service.execution.ExternalSystemExecutionAware;
+import com.intellij.openapi.externalSystem.service.execution.TargetEnvironmentConfigurationProvider;
 import com.intellij.openapi.externalSystem.service.notification.ExternalSystemProgressNotificationManager;
 import com.intellij.openapi.externalSystem.service.project.manage.ProjectDataManagerImpl;
 import com.intellij.openapi.externalSystem.service.remote.ExternalSystemProgressNotificationManagerImpl;
@@ -79,8 +81,13 @@ public class ExternalSystemResolveProjectTask extends AbstractExternalSystemTask
       ideProject = getIdeProject();
 
       ExternalSystemTaskNotificationListener progressNotificationListener = wrapWithListener(progressNotificationManager);
+      boolean isRunOnTargetsEnabled = Experiments.getInstance().isFeatureEnabled("run.targets");
+      TargetEnvironmentConfigurationProvider environmentConfigurationProvider = null;
       for (ExternalSystemExecutionAware executionAware : ExternalSystemExecutionAware.getExtensions(getExternalSystemId())) {
         executionAware.prepareExecution(this, myProjectPath, myIsPreviewMode, progressNotificationListener, ideProject);
+
+        if (!isRunOnTargetsEnabled || environmentConfigurationProvider != null) continue;
+        environmentConfigurationProvider = executionAware.getEnvironmentConfigurationProvider(myProjectPath, myIsPreviewMode, ideProject);
       }
 
       final ExternalSystemFacadeManager manager = ApplicationManager.getApplication().getService(ExternalSystemFacadeManager.class);
@@ -92,6 +99,7 @@ public class ExternalSystemResolveProjectTask extends AbstractExternalSystemTask
       if (StringUtil.isNotEmpty(myArguments)) {
         settings.withArguments(ParametersListUtil.parse(myArguments));
       }
+      ExternalSystemExecutionAware.Companion.setEnvironmentConfigurationProvider(settings, environmentConfigurationProvider);
     }
     catch (Exception e) {
       progressNotificationManager.onFailure(id, e);

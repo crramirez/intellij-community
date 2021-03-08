@@ -4,6 +4,7 @@ package com.intellij.openapi.updateSettings.impl;
 import com.intellij.ide.IdeBundle;
 import com.intellij.ide.plugins.*;
 import com.intellij.ide.plugins.marketplace.MarketplaceRequests;
+import com.intellij.ide.plugins.marketplace.PluginSignatureChecker;
 import com.intellij.ide.startup.StartupActionScriptManager;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
@@ -40,6 +41,9 @@ import java.util.Map;
  * @author anna
  */
 public final class PluginDownloader {
+
+  public static final PluginDownloader[] EMPTY_ARRAY = {};
+
   private static final Logger LOG = Logger.getInstance(PluginDownloader.class);
 
   private final PluginId myPluginId;
@@ -51,7 +55,7 @@ public final class PluginDownloader {
   private final String myDescription;
   private final @NotNull List<IdeaPluginDependency> myDependencies;
 
-  private final String myPluginUrl;
+  private final @NotNull String myPluginUrl;
   private final BuildNumber myBuildNumber;
 
   private String myPluginVersion;
@@ -173,6 +177,20 @@ public final class PluginDownloader {
     String errorMessage = null;
     try {
       myFile = downloadPlugin(indicator);
+      if (Registry.is("marketplace.certificate.signature.check")) {
+
+        if (myPluginUrl.startsWith(ApplicationInfoImpl.DEFAULT_PLUGINS_HOST)) {
+          if (!PluginSignatureChecker.isSignedByJetBrains(getPluginName(), myFile)) {
+            myShownErrors = true;
+            return null;
+          }
+        } else {
+          if (!PluginSignatureChecker.isSignedByCustomCertificates(getPluginName(), myFile)) {
+            myShownErrors = true;
+            return null;
+          }
+        }
+      }
     }
     catch (IOException ex) {
       myFile = null;
@@ -298,15 +316,13 @@ public final class PluginDownloader {
   }
 
   // creators-converters
-  public static PluginDownloader createDownloader(@NotNull IdeaPluginDescriptor descriptor) throws IOException {
+  public static @NotNull PluginDownloader createDownloader(@NotNull IdeaPluginDescriptor descriptor) throws IOException {
     return createDownloader(descriptor, null, null);
   }
 
-  public static @NotNull PluginDownloader createDownloader(
-    @NotNull IdeaPluginDescriptor descriptor,
-    @Nullable String host,
-    @Nullable BuildNumber buildNumber
-  ) throws IOException {
+  public static @NotNull PluginDownloader createDownloader(@NotNull IdeaPluginDescriptor descriptor,
+                                                           @Nullable String host,
+                                                           @Nullable BuildNumber buildNumber) throws IOException {
     String url;
     try {
       if (host != null && descriptor instanceof PluginNode) {

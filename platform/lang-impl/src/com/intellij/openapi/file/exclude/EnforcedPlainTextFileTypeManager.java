@@ -16,8 +16,10 @@ import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileWithId;
 import com.intellij.util.ArrayUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 
 import java.util.Collection;
 
@@ -29,7 +31,7 @@ import java.util.Collection;
 @Service
 public final class EnforcedPlainTextFileTypeManager {
   // optimization: manual arrays to optimize iteration
-  private Collection/*<VirtualFile>*/[] explicitlyMarkedSets = new Collection[0];
+  private Collection<VirtualFile>[] explicitlyMarkedSets = new Collection[0];
   private Project[] explicitlyMarkedProjects = new Project[0];
 
   public EnforcedPlainTextFileTypeManager() {
@@ -57,11 +59,11 @@ public final class EnforcedPlainTextFileTypeManager {
     return ApplicationManager.getApplication().getService(EnforcedPlainTextFileTypeManager.class);
   }
 
-  public boolean isMarkedAsPlainText(@NotNull VirtualFile file) {
+  boolean isMarkedAsPlainText(@NotNull VirtualFile file) {
     if (!(file instanceof VirtualFileWithId) || file.isDirectory()) {
       return false;
     }
-    for (Collection explicitlyMarked : explicitlyMarkedSets) {
+    for (Collection<VirtualFile> explicitlyMarked : explicitlyMarkedSets) {
       if (explicitlyMarked.contains(file)) {
         return true;
       }
@@ -69,22 +71,34 @@ public final class EnforcedPlainTextFileTypeManager {
     return false;
   }
 
-  public static boolean isApplicableFor(@Nullable VirtualFile file, boolean isToOriginal) {
+  static boolean isApplicableFor(@Nullable VirtualFile file, boolean isToOriginal) {
     if (!(file instanceof VirtualFileWithId) || file.isDirectory()) return false;
     if (ScratchUtil.isScratch(file)) return false;
     FileType originalType = FileTypeManager.getInstance().getFileTypeByFileName(file.getNameSequence());
     return !originalType.isBinary() && originalType != FileTypes.PLAIN_TEXT && (originalType != StdFileTypes.JAVA || isToOriginal);
   }
 
-  public void markAsPlainText(@NotNull Project project, VirtualFile @NotNull ... files) {
+  void markAsPlainText(@NotNull Project project, @NotNull VirtualFile @NotNull ... files) {
     setPlainTextStatus(project, true, files);
   }
 
-  public void resetOriginalFileType(@NotNull Project project, VirtualFile @NotNull ... files) {
+  @TestOnly
+  @ApiStatus.Internal
+  public void performTestWithMarkedAsPlainText(@NotNull Project project, @NotNull VirtualFile file, @NotNull Runnable runnable) {
+    setPlainTextStatus(project, true, file);
+    try {
+      runnable.run();
+    }
+    finally {
+      setPlainTextStatus(project, false, file);
+    }
+  }
+
+  public void resetOriginalFileType(@NotNull Project project, @NotNull VirtualFile @NotNull ... files) {
     setPlainTextStatus(project, false, files);
   }
 
-  private void setPlainTextStatus(@NotNull final Project project, final boolean toAdd, final VirtualFile @NotNull ... files) {
+  private void setPlainTextStatus(@NotNull Project project, boolean toAdd, @NotNull VirtualFile @NotNull ... files) {
     ApplicationManager.getApplication().runWriteAction(() -> {
       ProjectFileIndex fileIndex = ProjectFileIndex.getInstance(project);
       ProjectPlainTextFileTypeManager plainTextFileTypeManager = ProjectPlainTextFileTypeManager.getInstance(project);

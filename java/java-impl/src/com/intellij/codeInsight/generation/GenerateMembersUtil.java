@@ -28,7 +28,6 @@ import com.intellij.refactoring.util.RefactoringUtil;
 import com.intellij.util.*;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.text.UniqueNameGenerator;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -383,6 +382,7 @@ public final class GenerateMembersUtil {
                                                           @NotNull PsiSubstitutor substitutor,
                                                           @NotNull PsiMethod sourceMethod) {
     final PsiElement copy = ObjectUtils.notNull(typeParameter instanceof PsiCompiledElement ? ((PsiCompiledElement)typeParameter).getMirror() : typeParameter, typeParameter).copy();
+    LOG.assertTrue(copy != null, typeParameter);
     final Map<PsiElement, PsiElement> replacementMap = new HashMap<>();
     copy.accept(new JavaRecursiveElementVisitor() {
       @Override
@@ -581,15 +581,6 @@ public final class GenerateMembersUtil {
       OverrideImplementUtil.setupMethodBody(method, overridden, containingClass);
     }
     OverrideImplementUtil.annotateOnOverrideImplement(method, base, overridden);
-  }
-
-  /**
-   * @deprecated use {@link #copyOrReplaceModifierList(PsiModifierListOwner, PsiElement, PsiModifierListOwner)}. to be deleted in 2017.2
-   */
-  @ApiStatus.ScheduledForRemoval(inVersion = "2017.2")
-  @Deprecated
-  public static void copyOrReplaceModifierList(@NotNull PsiModifierListOwner sourceParam, @NotNull PsiModifierListOwner targetParam) {
-    copyOrReplaceModifierList(sourceParam, null, targetParam);
   }
 
   public static void copyOrReplaceModifierList(@NotNull PsiModifierListOwner sourceParam, @Nullable PsiElement targetClass, @NotNull PsiModifierListOwner targetParam) {

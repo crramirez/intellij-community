@@ -9,6 +9,7 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.command.undo.UndoManager;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.RangeMarker;
 import com.intellij.openapi.editor.event.CaretEvent;
@@ -38,6 +39,7 @@ import org.jetbrains.annotations.TestOnly;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.LockSupport;
@@ -68,18 +70,13 @@ public abstract class ParameterInfoControllerBase extends UserDataHolderBase imp
     Key.create("ParameterInfoControllerBase.ALL_CONTROLLERS_KEY");
 
   public static ParameterInfoControllerBase findControllerAtOffset(Editor editor, int offset) {
-    List<ParameterInfoControllerBase> allControllers = getAllControllers(editor);
-    for (int i = 0; i < allControllers.size(); ++i) {
-      ParameterInfoControllerBase controller = allControllers.get(i);
-
+    for (ParameterInfoControllerBase controller : new ArrayList<>(getAllControllers(editor))) {
       int lbraceOffset = controller.myLbraceMarker.getStartOffset();
       if (lbraceOffset == offset) {
         if (!controller.canBeDisposed()) {
           return controller;
         }
         Disposer.dispose(controller);
-        //noinspection AssignmentToForLoopParameter
-        --i;
       }
     }
 
@@ -89,8 +86,7 @@ public abstract class ParameterInfoControllerBase extends UserDataHolderBase imp
   static List<ParameterInfoControllerBase> getAllControllers(@NotNull Editor editor) {
     List<ParameterInfoControllerBase> array = editor.getUserData(ALL_CONTROLLERS_KEY);
     if (array == null) {
-      array = new ArrayList<>();
-      editor.putUserData(ALL_CONTROLLERS_KEY, array);
+      array = ((UserDataHolderEx)editor).putUserDataIfAbsent(ALL_CONTROLLERS_KEY, new CopyOnWriteArrayList<>());
     }
     return array;
   }
@@ -114,6 +110,10 @@ public abstract class ParameterInfoControllerBase extends UserDataHolderBase imp
                                      PsiElement parameterOwner,
                                      @NotNull ParameterInfoHandler handler,
                                      boolean showHint) {
+    if (!ApplicationManager.getApplication().isDispatchThread()) {
+      Logger.getInstance(ParameterInfoControllerBase.class).error("Constructor should be called on EDT");  // DEXP-575205
+    }
+
     myProject = project;
     myEditor = editor;
 
@@ -139,6 +139,9 @@ public abstract class ParameterInfoControllerBase extends UserDataHolderBase imp
         }
       }
     };
+  }
+
+  protected void setupListeners() {
     myEditor.getCaretModel().addCaretListener(myEditorCaretListener);
 
     myEditor.getDocument().addDocumentListener(new DocumentListener() {
@@ -148,7 +151,7 @@ public abstract class ParameterInfoControllerBase extends UserDataHolderBase imp
       }
     }, this);
 
-    MessageBusConnection connection = project.getMessageBus().connect(this);
+    MessageBusConnection connection = myProject.getMessageBus().connect(this);
     connection.subscribe(ExternalParameterInfoChangesProvider.TOPIC, (e, offset) -> {
       if (e != null && (e != myEditor || myLbraceMarker.getStartOffset() != offset)) return;
       updateWhenAllCommitted();
@@ -200,14 +203,6 @@ public abstract class ParameterInfoControllerBase extends UserDataHolderBase imp
   static boolean hasPrevOrNextParameter(Editor editor, int lbraceOffset, boolean isNext) {
     ParameterInfoControllerBase controller = findControllerAtOffset(editor, lbraceOffset);
     return controller != null && controller.getPrevOrNextParameterOffset(isNext) != -1;
-  }
-
-  static void prevOrNextParameter(Editor editor, int lbraceOffset, boolean isNext) {
-    ParameterInfoControllerBase controller = findControllerAtOffset(editor, lbraceOffset);
-    int newOffset = controller != null ? controller.getPrevOrNextParameterOffset(isNext) : -1;
-    if (newOffset != -1) {
-      controller.moveToParameterAtOffset(newOffset);
-    }
   }
 
   protected int getCurrentOffset() {

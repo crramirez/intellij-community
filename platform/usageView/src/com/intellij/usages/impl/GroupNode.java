@@ -13,6 +13,7 @@ import com.intellij.util.Consumer;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
+import it.unimi.dsi.fastutil.objects.Object2IntMap;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -71,8 +72,7 @@ public class GroupNode extends Node implements Navigatable, Comparable<GroupNode
   @NotNull
   GroupNode addOrGetGroup(@NotNull UsageGroup group,
                           int ruleIndex,
-                          @NotNull Consumer<? super UsageViewImpl.NodeChange> edtModelToSwingNodeChangesQueue,
-                          @NotNull Consumer<? super Usage> invalidatedUsagesConsumer) {
+                          @NotNull Consumer<? super UsageViewImpl.NodeChange> edtModelToSwingNodeChangesQueue) {
     synchronized (this) {
       return insertGroupNode(group, ruleIndex, edtModelToSwingNodeChangesQueue);
     }
@@ -215,7 +215,7 @@ public class GroupNode extends Node implements Navigatable, Comparable<GroupNode
     if (count == 0) {
       return;
     }
-    Object2IntOpenHashMap<MutableTreeNode> ordering = new Object2IntOpenHashMap<>(count);
+    Object2IntMap<MutableTreeNode> ordering = new Object2IntOpenHashMap<>(count);
     ordering.defaultReturnValue(-1);
     for (MutableTreeNode node : nodes) {
       ordering.put(node, parent.getIndex(node));
@@ -313,7 +313,7 @@ public class GroupNode extends Node implements Navigatable, Comparable<GroupNode
   static class NodeComparator implements Comparator<DefaultMutableTreeNode> {
     enum ClassIndex {UNKNOWN, USAGE_TARGET, GROUP, USAGE}
 
-    private static ClassIndex getClassIndex(DefaultMutableTreeNode node) {
+    private static ClassIndex getClassIndex(@NotNull DefaultMutableTreeNode node) {
       if (node instanceof UsageNode) return ClassIndex.USAGE;
       if (node instanceof GroupNode) return ClassIndex.GROUP;
       if (node instanceof UsageTargetNode) return ClassIndex.USAGE_TARGET;

@@ -1,64 +1,112 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ide.bookmarks.actions
 
-import com.intellij.ui.JBColor
+import com.intellij.ide.bookmarks.BookmarkBundle.message
+import com.intellij.ide.bookmarks.BookmarkManager
+import com.intellij.ide.bookmarks.BookmarkType
+import com.intellij.openapi.util.registry.Registry
+import com.intellij.ui.JBColor.namedColor
+import com.intellij.ui.components.panels.HorizontalLayout
 import com.intellij.ui.components.panels.RowGridLayout
 import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.RegionPaintIcon
 import com.intellij.util.ui.UIUtil
 import com.intellij.util.ui.components.BorderLayoutPanel
-import java.awt.Component
-import java.awt.Dimension
+import org.jetbrains.annotations.Nls
+import java.awt.*
+import java.awt.RenderingHints.*
 import java.awt.event.KeyEvent
 import java.awt.event.KeyListener
-import javax.swing.JButton
-import javax.swing.JPanel
-import javax.swing.LayoutFocusTraversalPolicy
-import javax.swing.SwingConstants.CENTER
-import javax.swing.SwingUtilities
+import javax.swing.*
 
-private const val DIGITS = "1234567890"
-private const val LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-private val SELECTED = JBColor(0xfafa8b, 0x675133)
+private val ASSIGNED_FOREGROUND = namedColor("AssignedMnemonic.foreground", 0x000000, 0xBBBBBB)
+private val ASSIGNED_BACKGROUND = namedColor("AssignedMnemonic.background", 0xF7C777, 0x665632)
+private val ASSIGNED_BORDER = namedColor("AssignedMnemonic.borderColor", ASSIGNED_BACKGROUND)
 
-internal open class MnemonicChooser : BorderLayoutPanel(), KeyListener {
-  private val layout = object : RowGridLayout(0, 4, 1, CENTER) {
-    override fun getCellSize(sizes: List<Dimension>) = super.getCellSize(sizes).also { it.width = it.height }
+private val CURRENT_FOREGROUND = namedColor("CurrentMnemonic.foreground", 0xFFFFFF, 0xFEFEFE)
+private val CURRENT_BACKGROUND = namedColor("CurrentMnemonic.background", 0x389FD6, 0x345F85)
+private val CURRENT_BORDER = namedColor("CurrentMnemonic.borderColor", CURRENT_BACKGROUND)
+
+private val SHARED_CURSOR by lazy { Cursor.getPredefinedCursor(Cursor.HAND_CURSOR) }
+private val SHARED_LAYOUT by lazy {
+  object : RowGridLayout(0, 4, 2, SwingConstants.CENTER) {
+    override fun getCellSize(sizes: List<Dimension>) = Dimension(JBUI.scale(24), JBUI.scale(28))
   }
+}
+
+internal class MnemonicChooser(
+  private val manager: BookmarkManager,
+  private val current: BookmarkType?,
+  private val onChosen: (BookmarkType) -> Unit
+) : BorderLayoutPanel(), KeyListener {
 
   init {
     isFocusCycleRoot = true
     focusTraversalPolicy = LayoutFocusTraversalPolicy()
-    addToLeft(createButtons(DIGITS))
-    addToRight(createButtons(LETTERS))
+    border = JBUI.Borders.empty(2, 6)
+    addToLeft(JPanel(SHARED_LAYOUT).apply {
+      border = JBUI.Borders.empty(5)
+      BookmarkType.values()
+        .filter { it.mnemonic.isDigit() }
+        .forEach { add(createButton(it)) }
+    })
+    addToRight(JPanel(SHARED_LAYOUT).apply {
+      border = JBUI.Borders.empty(5)
+      BookmarkType.values()
+        .filter { it.mnemonic.isLetter() }
+        .forEach { add(createButton(it)) }
+    })
+    if (manager.hasBookmarksWithMnemonics()) {
+      addToBottom(BorderLayoutPanel().apply {
+        border = JBUI.Borders.empty(5, 6, 1, 6)
+        addToTop(JSeparator())
+        addToBottom(JPanel(HorizontalLayout(12)).apply {
+          border = JBUI.Borders.empty(5, 1)
+          add(HorizontalLayout.LEFT, createLegend(ASSIGNED_BACKGROUND, message("mnemonic.chooser.legend.assigned.bookmark")))
+          if (current != null && current != BookmarkType.DEFAULT) {
+            add(HorizontalLayout.LEFT, createLegend(CURRENT_BACKGROUND, message("mnemonic.chooser.legend.current.bookmark")))
+          }
+        })
+      })
+    }
   }
 
-  private fun buttons() = UIUtil.uiTraverser(this).traverse().filter(JButton::class.java)
+  fun buttons() = UIUtil.uiTraverser(this).traverse().filter(JButton::class.java)
 
-  fun getPreferableFocusComponent() = buttons().first()
-
-  protected open fun onMnemonicChosen(mnemonic: Char) = Unit
-  protected open fun onCancelled() = Unit
-  protected open fun isOccupied(mnemonic: Char) = false
-
-  private fun createButtons(mnemonics: String): JPanel {
-    val panel = JPanel(layout)
-    panel.border = JBUI.Borders.empty(5)
-    mnemonics.forEach { panel.add(createButton(it)) }
-    return panel
+  private fun createButton(type: BookmarkType) = JButton(type.mnemonic.toString()).apply {
+    setMnemonic(type.mnemonic)
+    addActionListener { onChosen(type) }
+    putClientProperty("ActionToolbar.smallVariant", true)
+    when {
+      type == current -> {
+        putClientProperty("JButton.textColor", CURRENT_FOREGROUND)
+        putClientProperty("JButton.backgroundColor", CURRENT_BACKGROUND)
+        putClientProperty("JButton.borderColor", CURRENT_BORDER)
+      }
+      manager.findBookmarkForMnemonic(type.mnemonic) != null -> {
+        putClientProperty("JButton.textColor", ASSIGNED_FOREGROUND)
+        putClientProperty("JButton.backgroundColor", ASSIGNED_BACKGROUND)
+        putClientProperty("JButton.borderColor", ASSIGNED_BORDER)
+      }
+      else -> {
+        putClientProperty("JButton.textColor", UIManager.getColor("AvailableMnemonic.foreground"))
+        putClientProperty("JButton.backgroundColor", UIManager.getColor("AvailableMnemonic.background"))
+        putClientProperty("JButton.borderColor", UIManager.getColor("AvailableMnemonic.borderColor"))
+      }
+    }
+    inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0, true), "released")
+    inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0, false), "pressed")
+    cursor = SHARED_CURSOR
+  }.also {
+    it.addKeyListener(this)
   }
 
-  private fun createButton(mnemonic: Char): JButton {
-    val button = JButton(mnemonic.toString())
-    button.setMnemonic(mnemonic)
-    button.putClientProperty("ActionToolbar.smallVariant", true)
-    button.putClientProperty("JButton.backgroundColor", if (isOccupied(mnemonic)) SELECTED else null)
-    button.addActionListener { mnemonicSelected(mnemonic) }
-    button.addKeyListener(this)
-    return button
-  }
-
-  private fun mnemonicSelected(mnemonic: Char) {
-    onMnemonicChosen(mnemonic)
+  private fun createLegend(color: Color, @Nls text: String) = JLabel(text).apply {
+    icon = RegionPaintIcon(8) { g, x, y, width, height, _ ->
+      g.color = color
+      g.setRenderingHint(KEY_ANTIALIASING, VALUE_ANTIALIAS_ON)
+      g.fillOval(x, y, width, height)
+    }.withIconPreScaled(false)
   }
 
   private fun offset(delta: Int, size: Int) = when {
@@ -69,6 +117,16 @@ internal open class MnemonicChooser : BorderLayoutPanel(), KeyListener {
 
   private fun next(source: Component, dx: Int, dy: Int): Component? {
     val point = SwingUtilities.convertPoint(source, offset(dx, source.width), offset(dy, source.height), this)
+    val component = next(source, dx, dy, point)
+    if (component != null || !Registry.`is`("ide.bookmark.mnemonic.chooser.cyclic.scrolling.allowed")) return component
+    if (dx > 0) point.x = 0
+    if (dx < 0) point.x = dx + width
+    if (dy > 0) point.y = 0
+    if (dy < 0) point.y = dy + height
+    return next(source, dx, dy, point)
+  }
+
+  private fun next(source: Component, dx: Int, dy: Int, point: Point): Component? {
     while (contains(point)) {
       val component = SwingUtilities.getDeepestComponentAt(this, point.x, point.y)
       if (component is JButton) return component
@@ -82,16 +140,13 @@ internal open class MnemonicChooser : BorderLayoutPanel(), KeyListener {
   override fun keyPressed(event: KeyEvent) {
     if (event.modifiersEx == 0) {
       when (event.keyCode) {
-        KeyEvent.VK_ESCAPE -> onCancelled()
         KeyEvent.VK_UP, KeyEvent.VK_KP_UP -> next(event.component, 0, -1)?.requestFocus()
         KeyEvent.VK_DOWN, KeyEvent.VK_KP_DOWN -> next(event.component, 0, 1)?.requestFocus()
         KeyEvent.VK_LEFT, KeyEvent.VK_KP_LEFT -> next(event.component, -1, 0)?.requestFocus()
         KeyEvent.VK_RIGHT, KeyEvent.VK_KP_RIGHT -> next(event.component, 1, 0)?.requestFocus()
         else -> {
-          val mnemonic = event.keyCode.toChar()
-          if (DIGITS.indexOf(mnemonic) >= 0 || LETTERS.indexOf(mnemonic) >= 0) {
-            mnemonicSelected(mnemonic)
-          }
+          val type = BookmarkType.get(event.keyCode.toChar())
+          if (type != BookmarkType.DEFAULT) onChosen(type)
         }
       }
     }

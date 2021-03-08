@@ -35,7 +35,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-public class StopAction extends DumbAwareAction implements AnAction.TransparentUpdate {
+public class StopAction extends DumbAwareAction {
   private WeakReference<JBPopup> myActivePopupRef = null;
 
   private static boolean isPlaceGlobal(@NotNull AnActionEvent e) {
@@ -148,7 +148,7 @@ public class StopAction extends DumbAwareAction implements AnAction.TransparentU
       }
 
       IPopupChooserBuilder<HandlerItem> builder = JBPopupFactory.getInstance().createPopupChooserBuilder(items)
-        .setRenderer(new GroupedItemsListRenderer<>(new ListItemDescriptorAdapter<HandlerItem>() {
+        .setRenderer(new GroupedItemsListRenderer<>(new ListItemDescriptorAdapter<>() {
           @Nullable
           @Override
           public String getTextFor(HandlerItem item) {

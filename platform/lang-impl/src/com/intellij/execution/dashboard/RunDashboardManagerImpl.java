@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.execution.dashboard;
 
 import com.google.common.collect.Sets;
@@ -221,7 +221,7 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
     }
   }
 
-  private List<RunContentDescriptor> filterByContent(List<RunContentDescriptor> descriptors) {
+  private List<RunContentDescriptor> filterByContent(List<? extends RunContentDescriptor> descriptors) {
     return ContainerUtil.filter(descriptors, descriptor -> {
       Content content = descriptor.getAttachedContent();
       return content != null && content.getManager() == myContentManager;
@@ -304,7 +304,7 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
     return Collections.unmodifiableSet(myHiddenConfigurations);
   }
 
-  public void hideConfigurations(Collection<RunConfiguration> configurations) {
+  public void hideConfigurations(Collection<? extends RunConfiguration> configurations) {
     myHiddenConfigurations.addAll(configurations);
     syncConfigurations();
     if (!configurations.isEmpty()) {
@@ -313,7 +313,7 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
     updateDashboard(true);
   }
 
-  public void restoreConfigurations(Collection<RunConfiguration> configurations) {
+  public void restoreConfigurations(Collection<? extends RunConfiguration> configurations) {
     myHiddenConfigurations.removeAll(configurations);
     syncConfigurations();
     if (!configurations.isEmpty()) {
@@ -528,8 +528,8 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
     return null;
   }
 
-  private static boolean updateServiceSettings(List<List<RunDashboardServiceImpl>> newServiceList,
-                                               List<RunDashboardServiceImpl> oldServices) {
+  private static boolean updateServiceSettings(List<? extends List<RunDashboardServiceImpl>> newServiceList,
+                                               List<? extends RunDashboardServiceImpl> oldServices) {
     RunDashboardServiceImpl oldService = oldServices.get(0);
     RunnerAndConfigurationSettings oldSettings = oldService.getSettings();
     for (List<RunDashboardServiceImpl> newServices : newServiceList) {
@@ -648,8 +648,8 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
     myTypes.addAll(enableByDefaultTypes);
     if (!myTypes.isEmpty()) {
       loadHiddenConfigurations();
-      initServiceContentListeners();
       syncConfigurations();
+      initServiceContentListeners();
     }
   }
 
@@ -674,8 +674,8 @@ public final class RunDashboardManagerImpl implements RunDashboardManager, Persi
     myTypes.clear();
     myTypes.addAll(getEnableByDefaultTypes());
     if (!myTypes.isEmpty()) {
-      initServiceContentListeners();
       syncConfigurations();
+      initServiceContentListeners();
     }
   }
 

@@ -40,10 +40,12 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.components.DropDownLink
 import com.intellij.util.EventDispatcher
 import com.intellij.util.concurrency.annotations.RequiresEdt
+import com.intellij.util.concurrency.annotations.RequiresReadLock
 import com.intellij.util.containers.ContainerUtil
 import com.intellij.util.containers.WeakList
 import com.intellij.util.ui.JBUI
 import com.intellij.vcsUtil.VcsUtil
+import org.jetbrains.annotations.CalledInAny
 import java.awt.BorderLayout
 import java.awt.Graphics
 import java.awt.Point
@@ -51,7 +53,6 @@ import java.lang.ref.WeakReference
 import java.util.*
 import javax.swing.JComponent
 import javax.swing.JPanel
-import kotlin.collections.HashSet
 
 interface PartialLocalLineStatusTracker : LineStatusTracker<LocalRange> {
   fun getAffectedChangeListsIds(): List<String>
@@ -80,10 +81,15 @@ interface PartialLocalLineStatusTracker : LineStatusTracker<LocalRange> {
 
   open class ListenerAdapter : Listener
   interface Listener : EventListener {
-    fun onBecomingValid(tracker: PartialLocalLineStatusTracker) {}
-    fun onChangeListsChange(tracker: PartialLocalLineStatusTracker) {}
-    fun onChangeListMarkerChange(tracker: PartialLocalLineStatusTracker) {}
-    fun onExcludedFromCommitChange(tracker: PartialLocalLineStatusTracker) {}
+    fun onBecomingValid(tracker: PartialLocalLineStatusTracker) = Unit
+
+    @CalledInAny
+    fun onChangeListsChange(tracker: PartialLocalLineStatusTracker) = Unit
+
+    @CalledInAny
+    fun onChangeListMarkerChange(tracker: PartialLocalLineStatusTracker) = Unit
+
+    fun onExcludedFromCommitChange(tracker: PartialLocalLineStatusTracker) = Unit
   }
 }
 
@@ -415,7 +421,7 @@ class ChangelistsLocalLineStatusTracker(project: Project,
       after.marker = before.marker
     }
 
-    override fun onRangesMerged(block1: Block, block2: Block, merged: Block): Boolean {
+    override fun mergeRanges(block1: Block, block2: Block, merged: Block): Boolean {
       if (block1.marker == block2.marker &&
           block1.excludedFromCommit == block2.excludedFromCommit) {
         merged.marker = block1.marker
@@ -717,7 +723,7 @@ class ChangelistsLocalLineStatusTracker(project: Project,
     dropExistingUndoActions()
   }
 
-  @RequiresEdt
+  @RequiresReadLock
   internal fun storeTrackerState(): FullState {
     return documentTracker.readLock {
       val vcsContent = documentTracker.getContent(Side.LEFT)
@@ -739,7 +745,7 @@ class ChangelistsLocalLineStatusTracker(project: Project,
     }
   }
 
-  @RequiresEdt
+  @RequiresReadLock
   private fun collectRangeStates(): List<RangeState> {
     return documentTracker.readLock {
       blocks.map { RangeState(it.range, it.marker.changelistId, it.excludedFromCommit) }

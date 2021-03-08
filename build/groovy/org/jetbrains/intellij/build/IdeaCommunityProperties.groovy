@@ -64,9 +64,10 @@ class IdeaCommunityProperties extends BaseIdeaProperties {
   }
 
   protected void bundleExternalPlugins(BuildContext buildContext, String targetDirectory) {
-    ExternalPluginBundler.bundle('VulnerabilitySearch',
-                                 "$buildContext.paths.communityHome/build/dependencies",
-                                 buildContext, targetDirectory)
+    //temporary unbundle VulnerabilitySearch
+    //ExternalPluginBundler.bundle('VulnerabilitySearch',
+    //                             "$buildContext.paths.communityHome/build/dependencies",
+    //                             buildContext, targetDirectory)
   }
 
   @Override

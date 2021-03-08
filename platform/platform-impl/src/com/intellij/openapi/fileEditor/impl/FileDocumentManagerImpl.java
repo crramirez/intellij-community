@@ -60,6 +60,7 @@ import com.intellij.ui.components.JBScrollPane;
 import com.intellij.util.ExceptionUtil;
 import com.intellij.util.FileContentUtilCore;
 import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
@@ -259,11 +260,11 @@ public class FileDocumentManagerImpl extends FileDocumentManagerBase implements 
   }
 
   @Override
-  public void saveDocuments(@NotNull Predicate<Document> filter) {
+  public void saveDocuments(@NotNull Predicate<? super Document> filter) {
     saveDocuments(filter, true);
   }
 
-  private void saveDocuments(@Nullable Predicate<Document> filter, boolean isExplicit) {
+  private void saveDocuments(@Nullable Predicate<? super Document> filter, boolean isExplicit) {
     ApplicationManager.getApplication().assertIsDispatchThread();
     ((TransactionGuardImpl)TransactionGuard.getInstance()).assertWriteActionAllowed();
 
@@ -544,15 +545,24 @@ public class FileDocumentManagerImpl extends FileDocumentManagerBase implements 
     else if (VirtualFile.PROP_NAME.equals(event.getPropertyName())) {
       VirtualFile file = event.getFile();
       Document document = getCachedDocument(file);
-      if (document != null) {
-        if (isBinaryWithoutDecompiler(file)) {
-          // a file is linked to a document - chances are it is an "unknown text file" now
-          unbindFileFromDocument(file, document);
-        }
-        else if (FileContentUtilCore.FORCE_RELOAD_REQUESTOR.equals(event.getRequestor()) && isBinaryWithDecompiler(file)) {
-          reloadFromDisk(document);
-        }
+      if (document == null) {
+        return;
       }
+      if (isBinaryWithoutDecompiler(file)) {
+        // a file is linked to a document - chances are it is an "unknown text file" now
+        unbindFileFromDocument(file, document);
+        // to avoid weird inconsistencies when file opened in an editor tab got renamed to unknown extension and then typed into
+        closeAllEditorsFor(file);
+      }
+      else if (FileContentUtilCore.FORCE_RELOAD_REQUESTOR.equals(event.getRequestor()) && isBinaryWithDecompiler(file)) {
+        reloadFromDisk(document);
+      }
+    }
+  }
+
+  private static void closeAllEditorsFor(@NotNull VirtualFile file) {
+    for (Project project : ProjectManager.getInstance().getOpenProjects()) {
+      FileEditorManager.getInstance(project).closeFile(file);
     }
   }
 
@@ -619,7 +629,8 @@ public class FileDocumentManagerImpl extends FileDocumentManagerBase implements 
       };
     }
 
-    private void prepareForRangeMarkerUpdate(Map<VirtualFile, Document> strongRefsToDocuments, VirtualFile virtualFile) {
+    private void prepareForRangeMarkerUpdate(@NotNull Map<? super VirtualFile, ? super Document> strongRefsToDocuments,
+                                             @NotNull VirtualFile virtualFile) {
       Document document = myFileDocumentManager.getCachedDocument(virtualFile);
       if (document == null && DocumentImpl.areRangeMarkersRetainedFor(virtualFile)) {
         // re-create document with the old contents prior to this event
@@ -845,6 +856,7 @@ public class FileDocumentManagerImpl extends FileDocumentManagerBase implements 
   /** @deprecated another dirty Rider hack; don't use */
   @Deprecated
   @SuppressWarnings("StaticNonFinalField")
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static boolean ourConflictsSolverEnabled = true;
 
   @Override

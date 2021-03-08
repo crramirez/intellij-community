@@ -42,6 +42,7 @@ import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.UserDataHolder
 import com.intellij.openapi.util.registry.Registry
+import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.ui.AppUIUtil
 import com.intellij.ui.UIBundle
@@ -51,10 +52,7 @@ import com.intellij.util.Alarm
 import com.intellij.util.SmartList
 import com.intellij.util.concurrency.AppExecutorUtil
 import com.intellij.util.containers.ContainerUtil
-import org.jetbrains.annotations.ApiStatus
-import org.jetbrains.annotations.NotNull
-import org.jetbrains.annotations.Nullable
-import org.jetbrains.annotations.TestOnly
+import org.jetbrains.annotations.*
 import org.jetbrains.concurrency.AsyncPromise
 import org.jetbrains.concurrency.Promise
 import org.jetbrains.concurrency.resolvedPromise
@@ -243,6 +241,7 @@ class ExecutionManagerImpl(private val project: Project) : ExecutionManager(), D
                 RunContentManager.getInstance(project).showRunContent(executor, descriptor, environment.contentToReuse)
               }
               activity?.stageStarted("ui.shown")
+              environment.contentToReuse = descriptor
 
               val processHandler = descriptor.processHandler
               if (processHandler != null) {
@@ -271,7 +270,6 @@ class ExecutionManagerImpl(private val project: Project) : ExecutionManager(), D
                   }
                 }
               }
-              environment.contentToReuse = descriptor
             }
           }
           .onError(::handleError)
@@ -339,38 +337,38 @@ class ExecutionManagerImpl(private val project: Project) : ExecutionManager(), D
     val projectContext = context ?: SimpleDataContext.getProjectContext(project)
     val runBeforeRunExecutorMap = Collections.synchronizedMap(linkedMapOf<BeforeRunTask<*>, Executor>())
 
-    for (task in beforeRunTasks) {
-      val provider = BeforeRunTaskProvider.getProvider(project, task.providerId)
-      if (provider == null || task !is RunConfigurationBeforeRunProvider.RunConfigurableBeforeRunTask) {
-        continue
-      }
-
-      val settings = task.settings
-      if (settings != null) {
-        // as side-effect here we setup runners list ( required for com.intellij.execution.impl.RunManagerImpl.canRunConfiguration() )
-        var executor = if (Registry.`is`("lock.run.executor.for.before.run.tasks", false)) {
-          DefaultRunExecutor.getRunExecutorInstance()
-        }
-        else {
-          environment.executor
-        }
-
-        val builder = ExecutionEnvironmentBuilder.createOrNull(executor, settings)
-        if (builder == null || !RunManagerImpl.canRunConfiguration(settings, executor)) {
-          executor = DefaultRunExecutor.getRunExecutorInstance()
-          if (!RunManagerImpl.canRunConfiguration(settings, executor)) {
-            // we should stop here as before run task cannot be executed at all (possibly it's invalid)
-            onCancelRunnable?.run()
-            ExecutionUtil.handleExecutionError(environment, ExecutionException(
-              ExecutionBundle.message("dialog.message.cannot.start.before.run.task", settings)))
-            return
-          }
-        }
-        runBeforeRunExecutorMap[task] = executor
-      }
-    }
-
     ApplicationManager.getApplication().executeOnPooledThread {
+      for (task in beforeRunTasks) {
+        val provider = BeforeRunTaskProvider.getProvider(project, task.providerId)
+        if (provider == null || task !is RunConfigurationBeforeRunProvider.RunConfigurableBeforeRunTask) {
+          continue
+        }
+
+        val settings = task.settings
+        if (settings != null) {
+          // as side-effect here we setup runners list ( required for com.intellij.execution.impl.RunManagerImpl.canRunConfiguration() )
+          var executor = if (Registry.`is`("lock.run.executor.for.before.run.tasks", false)) {
+            DefaultRunExecutor.getRunExecutorInstance()
+          }
+          else {
+            environment.executor
+          }
+
+          val builder = ExecutionEnvironmentBuilder.createOrNull(executor, settings)
+          if (builder == null || !RunManagerImpl.canRunConfiguration(settings, executor)) {
+            executor = DefaultRunExecutor.getRunExecutorInstance()
+            if (!RunManagerImpl.canRunConfiguration(settings, executor)) {
+              // we should stop here as before run task cannot be executed at all (possibly it's invalid)
+              onCancelRunnable?.run()
+              ExecutionUtil.handleExecutionError(environment, ExecutionException(
+                ExecutionBundle.message("dialog.message.cannot.start.before.run.task", settings)))
+              return@executeOnPooledThread
+            }
+          }
+          runBeforeRunExecutorMap[task] = executor
+        }
+      }
+
       for (task in beforeRunTasks) {
         if (project.isDisposed) {
           return@executeOnPooledThread
@@ -602,7 +600,7 @@ class ExecutionManagerImpl(private val project: Project) : ExecutionManager(), D
           @Volatile
           var stopped = false
 
-          override fun addText(text: String, key: Key<*>) {
+          override fun addText(text: @Nls String, key: Key<*>) {
             processHandler.notifyTextAvailable(text, key)
           }
 
@@ -621,7 +619,7 @@ class ExecutionManagerImpl(private val project: Project) : ExecutionManager(), D
       catch (t: Throwable) {
         LOG.warn(t)
         promise.setError(ExecutionBundle.message("message.error.happened.0", t.localizedMessage))
-        processHandler.notifyTextAvailable(t.localizedMessage, ProcessOutputType.STDERR)
+        processHandler.notifyTextAvailable(StringUtil.notNullize(t.localizedMessage), ProcessOutputType.STDERR)
         processHandler.notifyTextAvailable("\n", ProcessOutputType.STDERR)
       }
       finally {
@@ -653,8 +651,10 @@ class ExecutionManagerImpl(private val project: Project) : ExecutionManager(), D
           editConfigurationUntilSuccess(environment, assignNewId)
         }
         else {
+          inProgress.add(InProgressEntry(environment.executor.id, environment.runner.runnerId))
           ReadAction.nonBlocking(Callable { RunManagerImpl.canRunConfiguration(environment) })
             .finishOnUiThread(ModalityState.NON_MODAL) { canRun ->
+              inProgress.remove(InProgressEntry(environment.executor.id, environment.runner.runnerId))
               if (canRun) {
                 executeConfiguration(environment, environment.runner, assignNewId, this.project, environment.runnerAndConfigurationSettings)
                 return@finishOnUiThread

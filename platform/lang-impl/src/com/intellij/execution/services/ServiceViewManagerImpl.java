@@ -8,6 +8,7 @@ import com.intellij.execution.services.ServiceModelFilter.ServiceViewFilter;
 import com.intellij.execution.services.ServiceViewDragHelper.ServiceViewDragBean;
 import com.intellij.execution.services.ServiceViewModel.*;
 import com.intellij.icons.AllIcons;
+import com.intellij.ide.lightEdit.LightEditUtil;
 import com.intellij.ide.projectView.PresentationData;
 import com.intellij.ide.util.treeView.TreeState;
 import com.intellij.navigation.ItemPresentation;
@@ -58,6 +59,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
+import static com.intellij.execution.services.ServiceViewContributor.CONTRIBUTOR_EP_NAME;
+
 @State(name = "ServiceViewManager", storages = @Storage(StoragePathMacros.PRODUCT_WORKSPACE_FILE))
 public final class ServiceViewManagerImpl implements ServiceViewManager, PersistentStateComponent<ServiceViewManagerImpl.State> {
   @NonNls private static final String HELP_ID = "services.tool.window";
@@ -77,14 +80,15 @@ public final class ServiceViewManagerImpl implements ServiceViewManager, Persist
 
   public ServiceViewManagerImpl(@NotNull Project project) {
     myProject = project;
+    LightEditUtil.forbidServiceInLightEditMode(project, getClass());
     myModel = new ServiceModel(myProject);
     Disposer.register(myProject, myModel);
     myModelFilter = new ServiceModelFilter();
-    loadGroups(ServiceModel.CONTRIBUTOR_EP_NAME.getExtensionList());
+    loadGroups(CONTRIBUTOR_EP_NAME.getExtensionList());
     myProject.getMessageBus().connect(myModel).subscribe(ServiceEventListener.TOPIC,
                                                          e -> myModel.handle(e).onSuccess(o -> eventHandled(e)));
     initRoots();
-    ServiceModel.CONTRIBUTOR_EP_NAME.addExtensionPointListener(new ServiceViewExtensionPointListener(), myProject);
+    CONTRIBUTOR_EP_NAME.addExtensionPointListener(new ServiceViewExtensionPointListener(), myProject);
   }
 
   private void eventHandled(@NotNull ServiceEvent e) {
@@ -110,7 +114,7 @@ public final class ServiceViewManagerImpl implements ServiceViewManager, Persist
       myModel.initRoots().onSuccess(o -> {
         Set<? extends ServiceViewContributor<?>> activeContributors = getActiveContributors();
         Map<String, Boolean> toolWindowIds = new HashMap<>();
-        for (ServiceViewContributor<?> contributor : ServiceModel.CONTRIBUTOR_EP_NAME.getExtensionList()) {
+        for (ServiceViewContributor<?> contributor : CONTRIBUTOR_EP_NAME.getExtensionList()) {
           String toolWindowId = getToolWindowId(contributor.getClass());
           if (toolWindowId != null) {
             Boolean active = toolWindowIds.putIfAbsent(toolWindowId, activeContributors.contains(contributor));

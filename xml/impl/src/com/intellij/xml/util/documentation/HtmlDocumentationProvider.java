@@ -1,17 +1,15 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.xml.util.documentation;
 
 import com.intellij.documentation.mdn.MdnSymbolDocumentation;
 import com.intellij.lang.Language;
 import com.intellij.lang.LanguageDocumentation;
 import com.intellij.lang.documentation.DocumentationProvider;
+import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.extensions.ExtensionPointName;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.psi.PsiElement;
-import com.intellij.psi.PsiManager;
-import com.intellij.psi.PsiWhiteSpace;
-import com.intellij.psi.XmlElementFactory;
+import com.intellij.psi.*;
 import com.intellij.psi.impl.source.xml.SchemaPrefix;
 import com.intellij.psi.meta.PsiMetaData;
 import com.intellij.psi.util.PsiTreeUtil;
@@ -21,12 +19,13 @@ import com.intellij.util.containers.ContainerUtil;
 import com.intellij.xml.XmlElementDescriptor;
 import com.intellij.xml.util.XmlUtil;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Collections;
 import java.util.List;
 
-import static com.intellij.documentation.mdn.MdnHtmlDocumentationKt.getMdnDocumentation;
+import static com.intellij.documentation.mdn.MdnDocumentationKt.getHtmlMdnDocumentation;
 import static com.intellij.util.ObjectUtils.doIfNotNull;
 
 /**
@@ -35,7 +34,6 @@ import static com.intellij.util.ObjectUtils.doIfNotNull;
 public class HtmlDocumentationProvider implements DocumentationProvider {
   public static final ExtensionPointName<DocumentationProvider> SCRIPT_PROVIDER_EP_NAME =
     ExtensionPointName.create("com.intellij.html.scriptDocumentationProvider");
-  public static final String ATTR_PREFIX = "#attr-";
 
   private final boolean myUseStyleProvider;
 
@@ -75,19 +73,7 @@ public class HtmlDocumentationProvider implements DocumentationProvider {
   public String generateDoc(PsiElement element, PsiElement originalElement) {
     String result = generateDocForHtml(element, originalElement);
     if (result != null) return result;
-
-    DocumentationProvider styleProvider = getStyleProvider();
-    if (styleProvider != null) {
-      result = styleProvider.generateDoc(element, originalElement);
-      if (result != null) return result;
-    }
-
-    DocumentationProvider scriptProvider = getScriptDocumentationProvider();
-    if (scriptProvider != null) {
-      result = scriptProvider.generateDoc(element, originalElement);
-    }
-
-    return result;
+    return generateDocFromStyleOrScript(element, originalElement);
   }
 
   @Override
@@ -118,6 +104,25 @@ public class HtmlDocumentationProvider implements DocumentationProvider {
   }
 
   @Override
+  public @Nullable PsiElement getCustomDocumentationElement(@NotNull Editor editor,
+                                                            @NotNull PsiFile file,
+                                                            @Nullable PsiElement contextElement, int targetOffset) {
+    if (contextElement instanceof XmlElement) return null;
+    DocumentationProvider styleProvider = getStyleProvider();
+    PsiElement result = null;
+    if (styleProvider != null) {
+      result = styleProvider.getCustomDocumentationElement(editor, file, contextElement, targetOffset);
+    }
+    if (result == null) {
+      DocumentationProvider scriptProvider = getScriptDocumentationProvider();
+      if (scriptProvider != null) {
+        result = scriptProvider.getCustomDocumentationElement(editor, file, contextElement, targetOffset);
+      }
+    }
+    return result;
+  }
+
+  @Override
   public PsiElement getDocumentationElementForLink(PsiManager psiManager, String link, PsiElement context) {
     PsiElement result = doIfNotNull(findDescriptor(psiManager, link, context), PsiMetaData::getDeclaration);
 
@@ -132,18 +137,34 @@ public class HtmlDocumentationProvider implements DocumentationProvider {
     return result;
   }
 
+  private String generateDocFromStyleOrScript(PsiElement element, PsiElement originalElement) {
+    DocumentationProvider styleProvider = getStyleProvider();
+    if (styleProvider != null) {
+      String result = styleProvider.generateDoc(element, originalElement);
+      if (result != null) return result;
+    }
+
+    DocumentationProvider scriptProvider = getScriptDocumentationProvider();
+    if (scriptProvider != null) {
+      String result = scriptProvider.generateDoc(element, originalElement);
+      if (result != null) return result;
+    }
+
+    return null;
+  }
+
   private String getUrlForHtml(PsiElement element, PsiElement originalElement) {
     return doIfNotNull(getDocumentation(element, originalElement), MdnSymbolDocumentation::getUrl);
   }
 
   private MdnSymbolDocumentation getDocumentation(PsiElement element, PsiElement originalElement) {
     XmlTag tagContext = findTagContext(originalElement);
-    MdnSymbolDocumentation result = getMdnDocumentation(element, tagContext);
+    MdnSymbolDocumentation result = getHtmlMdnDocumentation(element, tagContext);
     if (result == null && tagContext == null) {
       PsiElement declaration =
         doIfNotNull(findDescriptor(element.getManager(), element.getText(), originalElement), PsiMetaData::getDeclaration);
       if (declaration != null) {
-        result = getMdnDocumentation(declaration, null);
+        result = getHtmlMdnDocumentation(declaration, null);
       }
     }
     return result;
@@ -161,7 +182,7 @@ public class HtmlDocumentationProvider implements DocumentationProvider {
   private String generateDocForHtml(PsiElement element, PsiElement originalElement) {
     MdnSymbolDocumentation documentation = getDocumentation(element, originalElement);
     if (documentation != null) {
-      return documentation.getDocumentation();
+      return documentation.getDocumentation(true, null);
     }
 
     if (element instanceof XmlEntityDecl) {

@@ -1,21 +1,19 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ide.impl;
 
 import com.intellij.CommonBundle;
+import com.intellij.configurationStore.StoreUtil;
 import com.intellij.featureStatistics.fusCollectors.LifecycleUsageTriggerCollector;
 import com.intellij.ide.GeneralSettings;
 import com.intellij.ide.IdeBundle;
 import com.intellij.ide.RecentProjectsManager;
 import com.intellij.ide.actions.OpenFileAction;
 import com.intellij.ide.highlighter.ProjectFileType;
-import com.intellij.ide.util.PropertiesComponent;
-import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.ApplicationNamesInfo;
-import com.intellij.openapi.application.JetBrainsProtocolHandler;
-import com.intellij.openapi.application.ModalityState;
+import com.intellij.openapi.application.*;
 import com.intellij.openapi.components.StorageScheme;
 import com.intellij.openapi.components.impl.stores.IProjectStore;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
 import com.intellij.openapi.project.ex.ProjectManagerEx;
@@ -23,11 +21,13 @@ import com.intellij.openapi.project.impl.JBProtocolOpenProjectCommand;
 import com.intellij.openapi.startup.StartupManager;
 import com.intellij.openapi.ui.MessageDialogBuilder;
 import com.intellij.openapi.ui.Messages;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.NullableLazyValue;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.io.FileUtilRt;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.util.text.Strings;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -38,10 +38,7 @@ import com.intellij.project.ProjectKt;
 import com.intellij.projectImport.ProjectOpenProcessor;
 import com.intellij.ui.AppIcon;
 import com.intellij.ui.GuiUtils;
-import com.intellij.util.PathUtil;
-import com.intellij.util.PlatformUtils;
-import com.intellij.util.SmartList;
-import com.intellij.util.SystemProperties;
+import com.intellij.util.*;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.io.PathKt;
 import org.jetbrains.annotations.*;
@@ -55,17 +52,18 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.util.Collections;
 import java.util.List;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 
 public final class ProjectUtil {
   private static final Logger LOG = Logger.getInstance(ProjectUtil.class);
 
-  private static final String MODE_PROPERTY = "OpenOrAttachDialog.OpenMode";
-  @NonNls private static final String MODE_ATTACH = "attach";
-  private static final String MODE_REPLACE = "replace";
-  private static final String MODE_NEW = "new";
+  public static final String DEFAULT_PROJECT_NAME = "default";
+  public static final String PROJECTS_DIR = "projects";
+  public static final String PROPERTY_PROJECT_PATH = "%s.project.path";
+
+  private static String ourProjectsPath;
 
   private ProjectUtil() { }
 
@@ -73,6 +71,7 @@ public final class ProjectUtil {
    * @deprecated Use {@link #updateLastProjectLocation(Path)}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static void updateLastProjectLocation(@NotNull String projectFilePath) {
     updateLastProjectLocation(Paths.get(projectFilePath));
   }
@@ -105,9 +104,7 @@ public final class ProjectUtil {
     RecentProjectsManager.getInstance().setLastProjectCreationLocation(PathUtil.toSystemIndependentName(path));
   }
 
-  /**
-   * @deprecated Use {@link ProjectManagerEx#closeAndDispose(Project)}
-   */
+  /** @deprecated Use {@link ProjectManagerEx#closeAndDispose(Project)} */
   @Deprecated
   public static boolean closeAndDispose(@NotNull Project project) {
     return ProjectManagerEx.getInstanceEx().closeAndDispose(project);
@@ -269,7 +266,7 @@ public final class ProjectUtil {
     return projectFuture.thenApply(ProjectUtil::postProcess);
   }
 
-  private static @NotNull List<ProjectOpenProcessor> computeProcessors(@NotNull Path file, @NotNull NullableLazyValue<VirtualFile> lazyVirtualFile) {
+  private static @NotNull List<ProjectOpenProcessor> computeProcessors(@NotNull Path file, @NotNull NullableLazyValue<? extends VirtualFile> lazyVirtualFile) {
     List<ProjectOpenProcessor> processors = new SmartList<>();
     ProjectOpenProcessor.EXTENSION_POINT_NAME.forEachExtensionSafe(processor -> {
       if (processor instanceof PlatformProjectOpenProcessor) {
@@ -303,7 +300,7 @@ public final class ProjectUtil {
     return project;
   }
 
-  private static @Nullable Project chooseProcessorAndOpen(@NotNull List<ProjectOpenProcessor> processors,
+  private static @Nullable Project chooseProcessorAndOpen(@NotNull List<? extends ProjectOpenProcessor> processors,
                                                           @NotNull VirtualFile virtualFile,
                                                           @NotNull OpenProjectTask options) {
     ProjectOpenProcessor processor;
@@ -480,14 +477,17 @@ public final class ProjectUtil {
   }
 
   /**
-   * @return {@link GeneralSettings#OPEN_PROJECT_SAME_WINDOW}
-   * {@link GeneralSettings#OPEN_PROJECT_NEW_WINDOW}
-   * {@link Messages#CANCEL} - if user canceled the dialog
+   * @return {@link GeneralSettings#OPEN_PROJECT_SAME_WINDOW} or
+   *         {@link GeneralSettings#OPEN_PROJECT_NEW_WINDOW} or
+   *         {@link Messages#CANCEL} (when a user cancels the dialog)
    */
   public static int confirmOpenNewProject(boolean isNewProject) {
-    GeneralSettings settings = GeneralSettings.getInstance();
-    int confirmOpenNewProject = ApplicationManager.getApplication().isUnitTestMode() ? GeneralSettings.OPEN_PROJECT_NEW_WINDOW : settings.getConfirmOpenNewProject();
-    if (confirmOpenNewProject == GeneralSettings.OPEN_PROJECT_ASK) {
+    if (ApplicationManager.getApplication().isUnitTestMode()) {
+      return GeneralSettings.OPEN_PROJECT_NEW_WINDOW;
+    }
+
+    int mode = GeneralSettings.getInstance().getConfirmOpenNewProject();
+    if (mode == GeneralSettings.OPEN_PROJECT_ASK) {
       if (isNewProject) {
         boolean openInExistingFrame =
           MessageDialogBuilder.yesNo(IdeBundle.message("title.new.project"), IdeBundle.message("prompt.open.project.in.new.frame"))
@@ -495,9 +495,7 @@ public final class ProjectUtil {
             .noText(IdeBundle.message("button.new.frame"))
             .doNotAsk(new ProjectNewWindowDoNotAskOption())
             .guessWindowAndAsk();
-        int code = openInExistingFrame ? GeneralSettings.OPEN_PROJECT_SAME_WINDOW : GeneralSettings.OPEN_PROJECT_NEW_WINDOW;
-        LifecycleUsageTriggerCollector.onProjectFrameSelected(code);
-        return code;
+        mode = openInExistingFrame ? GeneralSettings.OPEN_PROJECT_SAME_WINDOW : GeneralSettings.OPEN_PROJECT_NEW_WINDOW;
       }
       else {
         int exitCode =
@@ -506,47 +504,50 @@ public final class ProjectUtil {
             .noText(IdeBundle.message("button.new.frame"))
             .doNotAsk(new ProjectNewWindowDoNotAskOption())
             .guessWindowAndAsk();
-        int code = exitCode == Messages.YES ? GeneralSettings.OPEN_PROJECT_SAME_WINDOW :
-                exitCode == Messages.NO ? GeneralSettings.OPEN_PROJECT_NEW_WINDOW : Messages.CANCEL;
-        LifecycleUsageTriggerCollector.onProjectFrameSelected(code);
-        return code;
+        mode = exitCode == Messages.YES ? GeneralSettings.OPEN_PROJECT_SAME_WINDOW :
+               exitCode == Messages.NO ? GeneralSettings.OPEN_PROJECT_NEW_WINDOW :
+               Messages.CANCEL;
+      }
+      if (mode != Messages.CANCEL) {
+        LifecycleUsageTriggerCollector.onProjectFrameSelected(mode);
       }
     }
-    return confirmOpenNewProject;
+    return mode;
   }
 
   /**
-   * @return 0 == GeneralSettings.OPEN_PROJECT_NEW_WINDOW
-   * 1 == GeneralSettings.OPEN_PROJECT_SAME_WINDOW
-   * 2 == GeneralSettings.OPEN_PROJECT_SAME_WINDOW_ATTACH
-   * -1 == CANCEL
+   * @return {@link GeneralSettings#OPEN_PROJECT_SAME_WINDOW} or
+   *         {@link GeneralSettings#OPEN_PROJECT_NEW_WINDOW} or
+   *         {@link GeneralSettings#OPEN_PROJECT_SAME_WINDOW_ATTACH} or
+   *         {@code -1} (when a user cancels the dialog)
    */
   public static int confirmOpenOrAttachProject() {
-    final String mode = PropertiesComponent.getInstance().getValue(MODE_PROPERTY);
-    int exitCode = Messages.showDialog(
-      IdeBundle.message("prompt.open.project.or.attach"),
-      IdeBundle.message("prompt.open.project.or.attach.title"),
-      new String[]{
-        IdeBundle.message("prompt.open.project.or.attach.button.this.window"),
-        IdeBundle.message("prompt.open.project.or.attach.button.new.window"),
-        IdeBundle.message("prompt.open.project.or.attach.button.attach"),
-        CommonBundle.getCancelButtonText()
-      },
-      MODE_NEW.equals(mode) ? 1 : MODE_REPLACE.equals(mode) ? 0 : MODE_ATTACH.equals(mode) ? 2 : 0,
-      Messages.getQuestionIcon());
-    int returnValue = exitCode == 0 ? GeneralSettings.OPEN_PROJECT_SAME_WINDOW :
-            exitCode == 1 ? GeneralSettings.OPEN_PROJECT_NEW_WINDOW :
-            exitCode == 2 ? GeneralSettings.OPEN_PROJECT_SAME_WINDOW_ATTACH :
-            -1;
-    if (returnValue != -1) {
-      LifecycleUsageTriggerCollector.onProjectFrameSelected(returnValue);
+    int mode = GeneralSettings.getInstance().getConfirmOpenNewProject();
+    if (mode == GeneralSettings.OPEN_PROJECT_ASK) {
+      int exitCode = Messages.showDialog(
+        IdeBundle.message("prompt.open.project.or.attach"),
+        IdeBundle.message("prompt.open.project.or.attach.title"),
+        new String[]{
+          IdeBundle.message("prompt.open.project.or.attach.button.this.window"),
+          IdeBundle.message("prompt.open.project.or.attach.button.new.window"),
+          IdeBundle.message("prompt.open.project.or.attach.button.attach"),
+          CommonBundle.getCancelButtonText()
+        },
+        0,
+        Messages.getQuestionIcon(),
+        new ProjectNewWindowDoNotAskOption());
+      mode = exitCode == 0 ? GeneralSettings.OPEN_PROJECT_SAME_WINDOW :
+             exitCode == 1 ? GeneralSettings.OPEN_PROJECT_NEW_WINDOW :
+             exitCode == 2 ? GeneralSettings.OPEN_PROJECT_SAME_WINDOW_ATTACH :
+             -1;
+      if (mode != -1) {
+        LifecycleUsageTriggerCollector.onProjectFrameSelected(mode);
+      }
     }
-    return returnValue;
+    return mode;
   }
 
-  /**
-   * @deprecated Use {@link #isSameProject(Path, Project)}
-   */
+  /** @deprecated Use {@link #isSameProject(Path, Project)} */
   @Deprecated
   public static boolean isSameProject(@Nullable String projectFilePath, @NotNull Project project) {
     return projectFilePath != null && isSameProject(Paths.get(projectFilePath), project);
@@ -622,7 +623,7 @@ public final class ProjectUtil {
     }
   }
 
-  public static String getBaseDir() {
+  public static @NotNull String getBaseDir() {
     String defaultDirectory = GeneralSettings.getInstance().getDefaultProjectDirectory();
     if (Strings.isNotEmpty(defaultDirectory)) {
       return defaultDirectory.replace('/', File.separatorChar);
@@ -643,7 +644,7 @@ public final class ProjectUtil {
     return tryOpenFiles(project, ContainerUtil.map(list, file -> file.toPath()), location);
   }
 
-  public static @Nullable Project tryOpenFiles(@Nullable Project project, @NotNull List<Path> list, String location) {
+  public static @Nullable Project tryOpenFiles(@Nullable Project project, @NotNull List<? extends Path> list, String location) {
     Project result = null;
 
     for (Path file : list) {
@@ -684,5 +685,108 @@ public final class ProjectUtil {
   public static boolean isValidProjectPath(@NotNull Path file) {
     return Files.isDirectory(file.resolve(Project.DIRECTORY_STORE_FOLDER)) ||
            (Strings.endsWith(file.toString(), ProjectFileType.DOT_DEFAULT_EXTENSION) && Files.isRegularFile(file));
+  }
+
+  @NotNull
+  @SystemDependent
+  public static String getProjectsPath() {
+    Application application = ApplicationManager.getApplication();
+    String fromSettings = application == null || application.isHeadlessEnvironment() ? null :
+                          GeneralSettings.getInstance().getDefaultProjectDirectory();
+    if (StringUtil.isNotEmpty(fromSettings)) {
+      return PathManager.getAbsolutePath(fromSettings);
+    }
+    if (ourProjectsPath == null) {
+      String produceName = ApplicationNamesInfo.getInstance().getProductName().toLowerCase(Locale.ENGLISH);
+      String propertyName = String.format(PROPERTY_PROJECT_PATH, produceName);
+      String propertyValue = System.getProperty(propertyName);
+      ourProjectsPath = propertyValue != null
+                        ? PathManager.getAbsolutePath(StringUtil.unquoteString(propertyValue, '\"'))
+                        : PathManager.getConfigPath() + File.separator + PROJECTS_DIR;
+    }
+    return ourProjectsPath;
+  }
+
+  public static @NotNull Path getProjectPath(@NotNull String name) {
+    return Paths.get(getProjectsPath(), name);
+  }
+
+  @Nullable
+  public static Path getProjectFile(@NotNull String name) {
+    Path projectDir = getProjectPath(name);
+    return Files.isDirectory(projectDir.resolve(Project.DIRECTORY_STORE_FOLDER)) ? projectDir : null;
+  }
+
+  @Nullable
+  public static Project openOrCreateProject(@NotNull String name) {
+    return openOrCreateProject(name, null);
+  }
+
+  @Nullable
+  public static Project openOrCreateProject(@NotNull String name, @Nullable ProjectCreatedCallback  projectCreatedCallback) {
+    return ProgressManager.getInstance().computeInNonCancelableSection(() -> openOrCreateProjectInner(name, projectCreatedCallback));
+  }
+
+  public interface ProjectCreatedCallback {
+    void projectCreated(Project project);
+  }
+
+  @NotNull
+  public static Set<String> getExistingProjectNames() {
+    Set<String> result = new LinkedHashSet<>();
+    File file = new File(getProjectsPath());
+    for (String name : ObjectUtils.notNull(file.list(), ArrayUtilRt.EMPTY_STRING_ARRAY)) {
+      if (getProjectFile(name) != null) {
+        result.add(name);
+      }
+    }
+    return result;
+  }
+
+  @Nullable
+  private static Project openOrCreateProjectInner(@NotNull String name, @Nullable ProjectCreatedCallback projectCreatedCallback) {
+    Path existingFile = getProjectFile(name);
+    if (existingFile != null) {
+      Project[] openProjects = ProjectManager.getInstance().getOpenProjects();
+      for (Project p : openProjects) {
+        if (!p.isDefault() && isSameProject(existingFile, p)) {
+          focusProjectWindow(p, false);
+          return p;
+        }
+      }
+      return ProjectManagerEx.getInstanceEx().openProject(existingFile, new OpenProjectTask().withRunConfigurators());
+    }
+
+    Path file = getProjectPath(name);
+    boolean created;
+    try {
+      created = (!Files.exists(file) && Files.createDirectories(file) != null) || Files.isDirectory(file);
+    }
+    catch (IOException e) {
+      created = false;
+    }
+
+    Path projectFile = null;
+    if (created) {
+      Project project = ProjectManagerEx.getInstanceEx().newProject(file, OpenProjectTask.newProject(true).withProjectName(name));
+      if (project != null) {
+        if (projectCreatedCallback != null) {
+          projectCreatedCallback.projectCreated(project);
+        }
+        saveAndDisposeProject(project);
+        projectFile = getProjectFile(name);
+      }
+    }
+    if (projectFile == null) {
+      return null;
+    }
+    return ProjectManagerEx.getInstanceEx().openProject(projectFile, OpenProjectTask.fromWizardAndRunConfigurators());
+  }
+
+  private static void saveAndDisposeProject(@NotNull Project project) {
+    StoreUtil.saveSettings(project, true);
+    ApplicationManager.getApplication().invokeAndWait(() -> {
+      WriteAction.run(() -> Disposer.dispose(project));
+    });
   }
 }

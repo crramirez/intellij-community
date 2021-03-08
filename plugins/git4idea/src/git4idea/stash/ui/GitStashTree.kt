@@ -10,8 +10,10 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DataKey
 import com.intellij.openapi.actionSystem.IdeActions
 import com.intellij.openapi.actionSystem.ex.ActionUtil
+import com.intellij.openapi.actionSystem.ex.ActionUtil.performActionDumbAwareWithCallbacks
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vcs.VcsException
 import com.intellij.openapi.vcs.changes.ui.*
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.ui.SimpleTextAttributes
@@ -47,7 +49,7 @@ class GitStashTree(project: Project, parentDisposable: Disposable) : ChangesTree
       val dataContext = DataManager.getInstance().getDataContext(this)
       val event = AnActionEvent.createFromAnAction(diffAction, e, GIT_STASH_UI_PLACE, dataContext)
       val isEnabled = ActionUtil.lastUpdateAndCheckDumb(diffAction, event, true)
-      if (isEnabled) ActionUtil.performActionDumbAwareWithCallbacks(diffAction, event, dataContext)
+      if (isEnabled) performActionDumbAwareWithCallbacks(diffAction, event)
 
       isEnabled
     }
@@ -83,7 +85,7 @@ class GitStashTree(project: Project, parentDisposable: Disposable) : ChangesTree
   override fun rebuildTree() {
     val modelBuilder = TreeModelBuilder(project, groupingSupport.grouping)
     val stashesMap = stashTracker.stashes
-    for ((root, stashes) in stashesMap) {
+    for ((root, stashesList) in stashesMap) {
       val rootNode = if (stashesMap.size > 1) {
         createRootNode(root).also { modelBuilder.insertSubtreeRoot(it) }
       }
@@ -91,19 +93,26 @@ class GitStashTree(project: Project, parentDisposable: Disposable) : ChangesTree
         modelBuilder.myRoot
       }
 
-      for (stash in stashes) {
-        val stashNode = StashInfoChangesBrowserNode(stash)
-        modelBuilder.insertSubtreeRoot(stashNode, rootNode)
+      when (stashesList) {
+        is GitStashTracker.Stashes.Error -> {
+          modelBuilder.insertErrorNode(stashesList.error, rootNode)
+        }
+        is GitStashTracker.Stashes.Loaded -> {
+          for (stash in stashesList.stashes) {
+            val stashNode = StashInfoChangesBrowserNode(stash)
+            modelBuilder.insertSubtreeRoot(stashNode, rootNode)
 
-        when (val stashData = stashCache.getCachedStashData(stash)) {
-          is GitStashCache.StashData.ChangeList -> {
-            modelBuilder.insertChanges(stashData.changeList.changes, stashNode)
-          }
-          is GitStashCache.StashData.Error -> {
-            modelBuilder.insertSubtreeRoot(ChangesBrowserStringNode(stashData.error.localizedMessage), stashNode)
-          }
-          null -> {
-            modelBuilder.insertSubtreeRoot(ChangesBrowserStringNode(IdeBundle.message("treenode.loading")), stashNode)
+            when (val stashData = stashCache.getCachedStashData(stash)) {
+              is GitStashCache.StashData.ChangeList -> {
+                modelBuilder.insertChanges(stashData.changeList.changes, stashNode)
+              }
+              is GitStashCache.StashData.Error -> {
+                modelBuilder.insertErrorNode(stashData.error, stashNode)
+              }
+              null -> {
+                modelBuilder.insertSubtreeRoot(ChangesBrowserStringNode(IdeBundle.message("treenode.loading")), stashNode)
+              }
+            }
           }
         }
       }
@@ -115,6 +124,11 @@ class GitStashTree(project: Project, parentDisposable: Disposable) : ChangesTree
     val repository = GitRepositoryManager.getInstance(project).getRepositoryForRootQuick(root)
                      ?: return ChangesBrowserNode.createFile(project, root)
     return RepositoryChangesBrowserNode(repository)
+  }
+
+  private fun TreeModelBuilder.insertErrorNode(error: VcsException, parent: ChangesBrowserNode<*>) {
+    val errorNode = ChangesBrowserStringNode(error.localizedMessage, SimpleTextAttributes.ERROR_ATTRIBUTES)
+    insertSubtreeRoot(errorNode, parent)
   }
 
   override fun resetTreeState() {

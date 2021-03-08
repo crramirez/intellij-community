@@ -15,6 +15,7 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.newvfs.VfsPresentationUtil;
 import com.intellij.ui.ColoredTreeCellRenderer;
 import com.intellij.ui.SimpleTextAttributes;
+import com.intellij.util.DeprecatedMethodException;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.Convertor;
 import com.intellij.util.containers.JBIterable;
@@ -62,8 +63,6 @@ public abstract class ChangesBrowserNode<T> extends DefaultMutableTreeNode imple
   public static final Convertor<TreePath, String> TO_TEXT_CONVERTER =
     path -> ((ChangesBrowserNode)path.getLastPathComponent()).getTextPresentation();
 
-  private SimpleTextAttributes myAttributes;
-
   private int myFileCount = -1;
   private int myDirectoryCount = -1;
   private boolean myHelper;
@@ -71,7 +70,6 @@ public abstract class ChangesBrowserNode<T> extends DefaultMutableTreeNode imple
 
   protected ChangesBrowserNode(T userObject) {
     super(userObject);
-    myAttributes = SimpleTextAttributes.REGULAR_ATTRIBUTES;
   }
 
   @NotNull
@@ -163,7 +161,7 @@ public abstract class ChangesBrowserNode<T> extends DefaultMutableTreeNode imple
     return false;
   }
 
-  public void markAsHelperNode() {
+  public final void markAsHelperNode() {
     myHelper = true;
   }
 
@@ -239,7 +237,7 @@ public abstract class ChangesBrowserNode<T> extends DefaultMutableTreeNode imple
   }
 
   public void render(@NotNull ChangesBrowserNodeRenderer renderer, boolean selected, boolean expanded, boolean hasFocus) {
-    renderer.append(getTextPresentation(), myAttributes);
+    renderer.append(getTextPresentation());
     appendCount(renderer);
   }
 
@@ -270,13 +268,19 @@ public abstract class ChangesBrowserNode<T> extends DefaultMutableTreeNode imple
     return getTextPresentation();
   }
 
+  /**
+   * Used by speedsearch, copy-to-clipboard and default renderer.
+   */
   @Nls
-  public abstract String getTextPresentation();
+  public String getTextPresentation() {
+    DeprecatedMethodException.reportDefaultImplementation(getClass(), "getTextPresentation", "A proper implementation required");
+    return userObject == null ? "" : userObject.toString(); //NON-NLS
+  }
 
   @Override
   public T getUserObject() {
     //noinspection unchecked
-    return (T) userObject;
+    return (T)userObject;
   }
 
   public boolean canAcceptDrop(final ChangeListDragBean dragBean) {
@@ -303,15 +307,6 @@ public abstract class ChangesBrowserNode<T> extends DefaultMutableTreeNode imple
 
   public static int compareFilePaths(@NotNull FilePath path1, @NotNull FilePath path2) {
     return ChangesComparator.getFilePathComparator(true).compare(path1, path2);
-  }
-
-  public void setAttributes(@NotNull SimpleTextAttributes attributes) {
-    myAttributes = attributes;
-  }
-
-  @NotNull
-  protected SimpleTextAttributes getAttributes() {
-    return myAttributes;
   }
 
   protected void appendParentPath(@NotNull ChangesBrowserNodeRenderer renderer, @Nullable FilePath parentPath) {
@@ -366,11 +361,6 @@ public abstract class ChangesBrowserNode<T> extends DefaultMutableTreeNode imple
     return ChangesUtil.findValidParentAccurately(filePath);
   }
 
-  @Deprecated
-  public final int getCount() {
-    return getFileCount();
-  }
-
   public boolean shouldExpandByDefault() {
     return true;
   }
@@ -392,6 +382,26 @@ public abstract class ChangesBrowserNode<T> extends DefaultMutableTreeNode imple
     @Override
     public String toString() {
       return myValue;
+    }
+  }
+
+  public static class WrapperTag implements Tag {
+    public static Tag wrap(@Nullable Object object) {
+      if (object == null) return null;
+      if (object instanceof Tag) return (Tag)object;
+      return new WrapperTag(object);
+    }
+
+    private final @NotNull Object myValue;
+
+    public WrapperTag(@NotNull Object value) {
+      myValue = value;
+    }
+
+    @Nls
+    @Override
+    public String toString() {
+      return myValue.toString(); //NON-NLS
     }
   }
 

@@ -2,6 +2,7 @@
 package com.intellij.execution;
 
 import com.intellij.execution.actions.RunContextAction;
+import com.intellij.execution.actions.RunNewConfigurationContextAction;
 import com.intellij.execution.compound.CompoundRunConfiguration;
 import com.intellij.execution.compound.SettingsAndEffectiveTarget;
 import com.intellij.execution.configurations.RunConfiguration;
@@ -12,10 +13,11 @@ import com.intellij.execution.impl.ExecutionManagerImplKt;
 import com.intellij.execution.runners.ExecutionEnvironmentBuilder;
 import com.intellij.execution.runners.ExecutionUtil;
 import com.intellij.execution.runners.ProgramRunner;
-import com.intellij.execution.segmentedRunDebugWidget.StateWidgetManager;
 import com.intellij.execution.stateExecutionWidget.StateWidgetProcess;
+import com.intellij.execution.stateWidget.StateWidget;
+import com.intellij.execution.stateWidget.StateWidgetAdditionActionsHolder;
+import com.intellij.execution.stateWidget.StateWidgetGroup;
 import com.intellij.execution.ui.RunContentDescriptor;
-import com.intellij.execution.ui.RunContentManager;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.macro.MacroManager;
 import com.intellij.openapi.actionSystem.*;
@@ -31,6 +33,7 @@ import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.wm.ToolWindowId;
 import com.intellij.util.IconUtil;
 import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
@@ -45,7 +48,6 @@ public final class ExecutorRegistryImpl extends ExecutorRegistry {
   public static final String RUNNERS_GROUP = "RunnerActions";
   public static final String RUN_CONTEXT_GROUP = "RunContextGroupInner";
   public static final String RUN_CONTEXT_GROUP_MORE = "RunContextGroupMore";
-  public static final String STATE_WIDGET_GROUP = "StateWidgetProcessesActionGroup";
 
   private final Set<String> myContextActionIdSet = new HashSet<>();
   private final Map<String, AnAction> myIdToAction = new HashMap<>();
@@ -84,6 +86,7 @@ public final class ExecutorRegistryImpl extends ExecutorRegistry {
 
     AnAction toolbarAction;
     AnAction runContextAction;
+    AnAction runNonExistingContextAction;
     if (executor instanceof ExecutorGroup) {
       ExecutorGroup<?> executorGroup = (ExecutorGroup<?>)executor;
       ActionGroup toolbarActionGroup = new SplitButtonAction(new ExecutorGroupActionGroup(executorGroup, ExecutorAction::new));
@@ -93,10 +96,12 @@ public final class ExecutorRegistryImpl extends ExecutorRegistry {
       presentation.setDescription(executor.getDescription());
       toolbarAction = toolbarActionGroup;
       runContextAction = new ExecutorGroupActionGroup(executorGroup, RunContextAction::new);
+      runNonExistingContextAction = new ExecutorGroupActionGroup(executorGroup, RunNewConfigurationContextAction::new);
     }
     else {
       toolbarAction = new ExecutorAction(executor);
       runContextAction = new RunContextAction(executor);
+      runNonExistingContextAction = new RunNewConfigurationContextAction(executor);
     }
 
     Executor.ActionWrapper customizer = executor.runnerActionsGroupExecutorActionCustomizer();
@@ -111,30 +116,47 @@ public final class ExecutorRegistryImpl extends ExecutorRegistry {
       ((DefaultActionGroup)actionManager.getAction(RUN_CONTEXT_GROUP_MORE))
         .add(action, new Constraints(Anchor.BEFORE, "CreateRunConfiguration"), actionManager);
     }
+    
+    AnAction nonExistingAction = registerAction(actionManager, newConfigurationContextActionId(executor), runNonExistingContextAction, myContextActionIdToAction);
+    ((DefaultActionGroup)actionManager.getAction(RUN_CONTEXT_GROUP_MORE))
+      .add(nonExistingAction, new Constraints(Anchor.BEFORE, "CreateNewRunConfiguration"), actionManager);
 
     if(StateWidgetProcess.isAvailable()) {
-      List<StateWidgetProcess> processes = StateWidgetProcess.getProcesses();
-      processes.stream().filter(it -> it.getExecutorId().equals(executor.getId()) && it.getShowInBar()).forEach(it -> {
+      StateWidgetProcess.getProcessesByExecutorId(executor.getId()).forEach(process -> {
         if (executor instanceof ExecutorGroup) {
           ExecutorGroup<?> executorGroup = (ExecutorGroup<?>)executor;
-          ActionGroup wrappedAction = new SplitButtonAction(new StateWidgetGroup(executorGroup, ExecutorAction::new, it));
-          Presentation presentation = wrappedAction.getTemplatePresentation();
-          presentation.setIcon(executor.getIcon());
-          presentation.setText(it.getName());
-          presentation.setDescription(executor.getDescription());
+          if(process.getShowInBar()) {
+            ActionGroup wrappedAction = new SplitButtonAction(new StateWidgetGroup(executorGroup, ExecutorAction::new, process));
+            Presentation presentation = wrappedAction.getTemplatePresentation();
+            presentation.setIcon(executor.getIcon());
+            presentation.setText(process.getName());
+            presentation.setDescription(executor.getDescription());
 
-          registerActionInGroup(actionManager, it.getActionId(), wrappedAction, STATE_WIDGET_GROUP,
+            registerActionInGroup(actionManager, process.getActionId(), wrappedAction, StateWidgetProcess.STATE_WIDGET_GROUP,
+                                  myStateWidgetIdToAction);
+          }
+
+          StateWidgetAdditionActionsHolder holder = new StateWidgetAdditionActionsHolder(executorGroup, process);
+
+          registerActionInGroup(actionManager, StateWidgetAdditionActionsHolder.getAdditionActionId(process), holder.getAdditionAction(), process.getMoreActionSubGroupName(),
+                                myStateWidgetIdToAction);
+          registerActionInGroup(actionManager, StateWidgetAdditionActionsHolder.getAdditionActionChooserGroupId(process), holder.getMoreActionChooserGroup(), process.getMoreActionSubGroupName(),
                                 myStateWidgetIdToAction);
         }
         else {
-          ExecutorAction wrappedAction = new StateWidget(executor, it);
-          registerActionInGroup(actionManager, it.getActionId(), wrappedAction, STATE_WIDGET_GROUP,
+          ExecutorAction wrappedAction = new StateWidget(executor, process);
+          registerActionInGroup(actionManager, process.getActionId(), wrappedAction, StateWidgetProcess.STATE_WIDGET_GROUP,
                                 myStateWidgetIdToAction);
         }
       });
     }
 
     myContextActionIdSet.add(executor.getContextActionId());
+  }
+
+  @NonNls
+  private static String newConfigurationContextActionId(@NotNull Executor executor) {
+    return "newConfiguration" + executor.getContextActionId();
   }
 
   private static boolean isExecutorInMainGroup(@NotNull Executor executor) {
@@ -170,7 +192,17 @@ public final class ExecutorRegistryImpl extends ExecutorRegistry {
     else {
       unregisterAction(executor.getContextActionId(), RUN_CONTEXT_GROUP_MORE, myContextActionIdToAction);
     }
-    unregisterAction(StateWidgetProcess.generateActionID(executor.getId()), STATE_WIDGET_GROUP, myStateWidgetIdToAction);
+    unregisterAction(newConfigurationContextActionId(executor), RUN_CONTEXT_GROUP_MORE, myContextActionIdToAction);
+
+    StateWidgetProcess.getProcessesByExecutorId(executor.getId()).forEach(process -> {
+      unregisterAction(process.getActionId(), StateWidgetProcess.STATE_WIDGET_GROUP, myStateWidgetIdToAction);
+      if (executor instanceof ExecutorGroup) {
+        unregisterAction(StateWidgetAdditionActionsHolder.getAdditionActionId(process), process.getMoreActionSubGroupName(),
+                         myStateWidgetIdToAction);
+        unregisterAction(StateWidgetAdditionActionsHolder.getAdditionActionChooserGroupId(process), process.getMoreActionSubGroupName(),
+                         myStateWidgetIdToAction);
+      }
+    });
   }
 
   private static void unregisterAction(@NotNull String actionId, @NotNull String groupId, @NotNull Map<String, AnAction> map) {
@@ -217,68 +249,10 @@ public final class ExecutorRegistryImpl extends ExecutorRegistry {
     }
   }
 
-  private static final class StateWidgetGroup extends ExecutorGroupActionGroup {
-    final StateWidgetProcess myProcess;
-
-    private StateWidgetGroup(@NotNull ExecutorGroup<?> executorGroup,
-                             @NotNull Function<? super Executor, ? extends AnAction> childConverter, @NotNull StateWidgetProcess process) {
-      super(executorGroup, childConverter);
-      myProcess = process;
-    }
-
-    @Override
-    public boolean displayTextInToolbar() {
-      return true;
-    }
-
-    @Override
-    public void update(@NotNull AnActionEvent e) {
-      Project project = e.getProject();
-      if (project != null) {
-        if (StateWidgetManager.getInstance(project).getExecutionsCount() == 0) {
-          e.getPresentation().setEnabledAndVisible(true);
-          super.update(e);
-          e.getPresentation().setText(myExecutorGroup.getActionName());
-          return;
-        }
-      }
-      e.getPresentation().setEnabledAndVisible(false);
-    }
-  }
-
-  private static final class StateWidget extends ExecutorAction {
-    final StateWidgetProcess myProcess;
-
-    @Override
-    public boolean displayTextInToolbar() {
-      return true;
-    }
-
-    private StateWidget(@NotNull Executor executor, @NotNull StateWidgetProcess process) {
-      super(executor);
-      myProcess = process;
-    }
-
-    @Override
-    public void update(@NotNull AnActionEvent e) {
-      Project project = e.getProject();
-      if (project != null) {
-        if (StateWidgetManager.getInstance(project).getExecutionsCount() == 0) {
-          e.getPresentation().setEnabledAndVisible(true);
-          super.update(e);
-          e.getPresentation().setEnabledAndVisible(e.getPresentation().isEnabled() && e.getPresentation().isVisible());
-          e.getPresentation().setText(myExecutor.getActionName());
-          return;
-        }
-      }
-      e.getPresentation().setEnabledAndVisible(false);
-    }
-  }
-
-  private static class ExecutorAction extends AnAction implements DumbAware, UpdateInBackground {
+  public static class ExecutorAction extends AnAction implements DumbAware, UpdateInBackground {
     protected final Executor myExecutor;
 
-    private ExecutorAction(@NotNull Executor executor) {
+    protected ExecutorAction(@NotNull Executor executor) {
       super(executor.getStartActionText(), executor.getDescription(), IconLoader.createLazy(() -> executor.getIcon()));
       myExecutor = executor;
     }
@@ -351,10 +325,7 @@ public final class ExecutorRegistryImpl extends ExecutorRegistry {
 
       List<RunContentDescriptor> runningDescriptors =
         executionManager.getRunningDescriptors(s -> ExecutionManagerImplKt.isOfSameType(s, selectedConfiguration));
-      runningDescriptors = ContainerUtil.filter(runningDescriptors, descriptor -> {
-        RunContentDescriptor contentDescriptor = RunContentManager.getInstance(project).findContentDescriptor(myExecutor, descriptor.getProcessHandler());
-        return contentDescriptor != null && executionManager.getExecutors(contentDescriptor).contains(myExecutor);
-      });
+      runningDescriptors = ContainerUtil.filter(runningDescriptors, descriptor -> executionManager.getExecutors(descriptor).contains(myExecutor));
 
       if (!configuration.isAllowRunningInParallel() && !runningDescriptors.isEmpty() && DefaultRunExecutor.EXECUTOR_ID.equals(myExecutor.getId())) {
         return AllIcons.Actions.Restart;
@@ -401,7 +372,7 @@ public final class ExecutorRegistryImpl extends ExecutorRegistry {
     protected final ExecutorGroup<?> myExecutorGroup;
     private final Function<? super Executor, ? extends AnAction> myChildConverter;
 
-    private ExecutorGroupActionGroup(@NotNull ExecutorGroup<?> executorGroup, @NotNull Function<? super Executor, ? extends AnAction> childConverter) {
+    protected ExecutorGroupActionGroup(@NotNull ExecutorGroup<?> executorGroup, @NotNull Function<? super Executor, ? extends AnAction> childConverter) {
       myExecutorGroup = executorGroup;
       myChildConverter = childConverter;
     }

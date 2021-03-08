@@ -21,10 +21,12 @@ import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.util.EmptyRunnable;
+import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.text.HtmlBuilder;
+import com.intellij.testFramework.TestModeFlags;
 import com.intellij.ui.ComponentUtil;
+import com.intellij.util.ThrowableRunnable;
 import com.intellij.util.indexing.DumbModeAccessType;
-import com.intellij.util.indexing.FileBasedIndex;
 import com.intellij.util.indexing.IndexingBundle;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
@@ -39,6 +41,7 @@ import java.net.Socket;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public abstract class SearchForTestsTask extends Task.Backgroundable {
+  public static final Key<Boolean> CONNECT_IN_UNIT_TEST_MODE_PROPERTY_KEY = Key.create("SearchForTestsTask.connect.in.unit.test.mode");
 
   private static final Logger LOG = Logger.getInstance(SearchForTestsTask.class);
   protected Socket mySocket;
@@ -64,7 +67,7 @@ public abstract class SearchForTestsTask extends Task.Backgroundable {
   }
 
   public void startSearch() {
-    if (ApplicationManager.getApplication().isUnitTestMode()) {
+    if (ApplicationManager.getApplication().isUnitTestMode() && !TestModeFlags.is(CONNECT_IN_UNIT_TEST_MODE_PROPERTY_KEY)) {
       try {
         search();
       }
@@ -108,28 +111,25 @@ public abstract class SearchForTestsTask extends Task.Backgroundable {
     try {
       mySocket = myServerSocket.accept();
       final ExecutionException[] ex = new ExecutionException[1];
-      NonBlockingReadAction<Void> readAction = ReadAction.nonBlocking(() -> {
-        try {
-          if (myAllowIndexInDumbMode && DumbService.isDumb(myProject)) {
-            myIncompleteIndexUsageCallback.run();
-            DumbModeAccessType.RELIABLE_DATA_ONLY.ignoreDumbMode(() -> {
-              search();
-              return null;
-            });
-          } else {
-            search();
-          }
-        }
-        catch (ExecutionException e) {
-          ex[0] = e;
-        }
-      });
+      NonBlockingReadAction<Void> readAction = ReadAction.nonBlocking(() -> performWithIncompleteIndex(this::search, ex));
       if (requiresSmartMode() && !myAllowIndexInDumbMode) {
         readAction = readAction.inSmartMode(myProject);
       }
       readAction.executeSynchronously();
       if (ex[0] != null) {
         logCantRunException(ex[0]);
+      }
+
+      ExecutionException[] onFoundEx = new ExecutionException[1];
+      Runnable runnable = () -> performWithIncompleteIndex(this::onFound, onFoundEx);
+      if (requiresSmartMode() && !myAllowIndexInDumbMode) {
+        DumbService.getInstance(getProject()).runReadActionInSmartMode(runnable);
+      }
+      else {
+        ReadAction.run(runnable::run);
+      }
+      if (onFoundEx[0] != null) {
+        throw onFoundEx[0];
       }
     }
     catch (ProcessCanceledException e) {
@@ -154,28 +154,29 @@ public abstract class SearchForTestsTask extends Task.Backgroundable {
 
   @Override
   public void onSuccess() {
-    Runnable runnable = () -> {
-      try {
-        if (myAllowIndexInDumbMode && DumbService.isDumb(myProject)) {
-          myIncompleteIndexUsageCallback.run();
-          DumbModeAccessType.RELIABLE_DATA_ONLY.ignoreDumbMode(() -> {
-            onFound();
-            return null;
-          });
-        } else {
-          onFound();
-        }
-      }
-      catch (ExecutionException e) {
-        LOG.error(e);
-      }
-      finish();
-    };
+    Runnable runnable = this::finish;
     if (requiresSmartMode() && !myAllowIndexInDumbMode) {
       DumbService.getInstance(getProject()).runWhenSmart(runnable);
     }
     else {
       runnable.run();
+    }
+  }
+
+  private void performWithIncompleteIndex(ThrowableRunnable<ExecutionException> action, ExecutionException[] ex) {
+    try {
+      if (myAllowIndexInDumbMode && DumbService.isDumb(myProject)) {
+        myIncompleteIndexUsageCallback.run();
+        DumbModeAccessType.RELIABLE_DATA_ONLY.ignoreDumbMode(() -> {
+          action.run();
+          return null;
+        });
+      } else {
+        action.run();
+      }
+    }
+    catch (ExecutionException e) {
+      ex[0] = e;
     }
   }
 

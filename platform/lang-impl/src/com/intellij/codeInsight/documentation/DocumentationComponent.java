@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight.documentation;
 
 import com.intellij.codeInsight.CodeInsightBundle;
@@ -139,7 +139,7 @@ public class DocumentationComponent extends JPanel implements Disposable, DataPr
   private DocumentationProvider myProvider;
   private Reference<Component> myReferenceComponent;
 
-  private final MyDictionary<String, Image> myImageProvider = new MyDictionary<String, Image>() {
+  private final MyDictionary<String, Image> myImageProvider = new MyDictionary<>() {
     @Override
     public Image get(Object key) {
       return getImageByKeyImpl(key);
@@ -567,6 +567,8 @@ public class DocumentationComponent extends JPanel implements Disposable, DataPr
     editorKit.getStyleSheet().addRule(".definition-only { padding: " + definitionTopPadding + "px 17px 0 " + leftPadding + "px; }");
     editorKit.getStyleSheet().addRule(".definition-only pre { margin-bottom: 0 }");
     editorKit.getStyleSheet().addRule(".content { padding: 5px 16px 0 " + leftPadding + "px; max-width: 100% }");
+    editorKit.getStyleSheet().addRule(".content-separated { padding: 5px 16px 5px " + leftPadding + "px; max-width: 100%;" +
+                                      "                     border-bottom: thin solid #" + ColorUtil.toHex(borderColor) + "; }");
     editorKit.getStyleSheet().addRule(".content-only { padding: 8px 16px 0 " + leftPadding + "px; max-width: 100% }");
     editorKit.getStyleSheet().addRule(".bottom { padding: 3px 16px 0 " + leftPadding + "px; }");
     editorKit.getStyleSheet().addRule(".bottom-no-content { padding: 5px 16px 0 " + leftPadding + "px; }");
@@ -587,12 +589,12 @@ public class DocumentationComponent extends JPanel implements Disposable, DataPr
   }
 
   private static Color getLinkColor() {
-    return JBUI.CurrentTheme.Link.linkColor();
+    return JBUI.CurrentTheme.Link.Foreground.ENABLED;
   }
 
   @Override
   public Object getData(@NotNull @NonNls String dataId) {
-    if (DocumentationManager.SELECTED_QUICK_DOC_TEXT.getName().equals(dataId)) {
+    if (DocumentationManager.SELECTED_QUICK_DOC_TEXT.is(dataId)) {
       // Javadocs often contain &nbsp; symbols (non-breakable white space). We don't want to copy them as is and replace
       // with raw white spaces. See IDEA-86633 for more details.
       String selectedText = myEditorPane.getSelectedText();
@@ -909,7 +911,28 @@ public class DocumentationComponent extends JPanel implements Disposable, DataPr
     TextUI ui = myEditorPane.getUI();
     View view = ui.getRootView(myEditorPane);
     View definition = findDefinition(view);
-    return definition != null ? (int)definition.getPreferredSpan(View.X_AXIS) : -1;
+
+    if (definition == null) {
+      return -1;
+    }
+    int defaultPreferredSize = (int)definition.getPreferredSpan(View.X_AXIS);
+
+    // Heuristics to calculate popup width based on the amount of the content.
+    // The proportions are set for 4 chars/1px in range between 200 and 1000 chars.
+    // 200 chars and less is 300px, 1000 chars and more is 500px.
+    // These values were calculated based on experiments with varied content and manual resizing to comfortable width.
+    int textLength = definition.getDocument().getLength();
+    final int contentLengthPreferredSize;
+    if (textLength < 200) {
+      contentLengthPreferredSize = JBUIScale.scale(300);
+    }
+    else if (textLength > 200 && textLength < 1000) {
+      contentLengthPreferredSize = JBUIScale.scale(300) + JBUIScale.scale(1) * (textLength - 200) * (500 - 300) / (1000 - 200);
+    }
+    else {
+      contentLengthPreferredSize = JBUIScale.scale(500);
+    }
+    return Math.max(contentLengthPreferredSize, defaultPreferredSize);
   }
 
   private static View findDefinition(View view) {

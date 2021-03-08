@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ide.plugins;
 
 import com.intellij.execution.process.ProcessIOExecutorService;
@@ -7,6 +7,7 @@ import com.intellij.icons.AllIcons;
 import com.intellij.ide.CopyProvider;
 import com.intellij.ide.DataManager;
 import com.intellij.ide.IdeBundle;
+import com.intellij.ide.plugins.certificates.PluginCertificateManager;
 import com.intellij.ide.plugins.marketplace.MarketplaceRequests;
 import com.intellij.ide.plugins.newui.*;
 import com.intellij.ide.util.PropertiesComponent;
@@ -19,6 +20,7 @@ import com.intellij.openapi.application.ex.ApplicationInfoEx;
 import com.intellij.openapi.application.ex.ApplicationManagerEx;
 import com.intellij.openapi.application.impl.ApplicationInfoImpl;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.extensions.PluginId;
 import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.options.ConfigurationException;
@@ -39,26 +41,23 @@ import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.ThrowableNotNullFunction;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.util.text.StringUtilRt;
-import com.intellij.ui.*;
+import com.intellij.ui.JBColor;
+import com.intellij.ui.LicensingFacade;
+import com.intellij.ui.RelativeFont;
+import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.components.JBTextField;
 import com.intellij.ui.components.fields.ExtendableTextComponent;
 import com.intellij.ui.components.labels.LinkLabel;
 import com.intellij.ui.components.labels.LinkListener;
 import com.intellij.ui.popup.PopupFactoryImpl;
-import com.intellij.ui.popup.list.PopupListElementRenderer;
 import com.intellij.ui.scale.JBUIScale;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.net.HttpConfigurable;
 import com.intellij.util.ui.*;
-import org.jetbrains.annotations.Nls;
-import org.jetbrains.annotations.NonNls;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.*;
 
 import javax.swing.*;
-import javax.swing.border.Border;
-import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.io.IOException;
 import java.text.DecimalFormat;
@@ -74,7 +73,7 @@ import java.util.function.Supplier;
 /**
  * @author Alexander Lobas
  */
-public class PluginManagerConfigurable
+public final class PluginManagerConfigurable
   implements SearchableConfigurable, Configurable.NoScroll, Configurable.NoMargin, Configurable.TopComponentProvider {
 
   private static final Logger LOG = Logger.getInstance(PluginManagerConfigurable.class);
@@ -144,6 +143,7 @@ public class PluginManagerConfigurable
    * @deprecated use {@link PluginManagerConfigurable}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public PluginManagerConfigurable(PluginManagerUISettings uiSettings) {
     this();
   }
@@ -257,6 +257,14 @@ public class PluginManagerConfigurable
       }
     });
     actions.addSeparator();
+    actions.add(new DumbAwareAction(IdeBundle.message("plugin.manager.custom.certificates")) {
+      @Override
+      public void actionPerformed(@NotNull AnActionEvent e) {
+        if (ShowSettingsUtil.getInstance().editConfigurable(myCardPanel, new PluginCertificateManager())) {
+          resetPanels();
+        }
+      }
+    });
     actions.add(new InstallFromDiskAction());
     actions.addSeparator();
     actions.add(new ChangePluginStateAction(false));
@@ -272,36 +280,7 @@ public class PluginManagerConfigurable
 
     DataContext context = DataManager.getInstance().getDataContext(component);
 
-    JBPopup popup = new PopupFactoryImpl.ActionGroupPopup(null, actions, context, false, false, false, true, null, -1, null, null) {
-      @Override
-      protected ListCellRenderer getListElementRenderer() {
-        return new PopupListElementRenderer(this) {
-          @Override
-          protected SeparatorWithText createSeparator() {
-            return new SeparatorWithText() {
-              {
-                setTextForeground(JBColor.BLACK);
-                setCaptionCentered(false);
-              }
-
-              @Override
-              protected void paintLine(Graphics g, int x, int y, int width) {
-              }
-            };
-          }
-
-          @Override
-          protected void setSeparatorFont(Font font) {
-            mySeparatorComponent.setFont(font);
-          }
-
-          @Override
-          protected Border getDefaultItemComponentBorder() {
-            return new EmptyBorder(JBInsets.create(UIUtil.getListCellVPadding(), 15));
-          }
-        };
-      }
-    };
+    JBPopup popup = new PopupFactoryImpl.ActionGroupPopup(null, actions, context, false, false, false, true, null, -1, null, null);
     popup.addListener(new JBPopupListener() {
       @Override
       public void beforeShown(@NotNull LightweightWindowEvent event) {
@@ -471,12 +450,12 @@ public class PluginManagerConfigurable
             if (word == null) return null;
             switch (word) {
               case TAG:
-                if (ContainerUtil.isEmpty(myTagsSorted)) { // XXX
+                if (myTagsSorted == null || myTagsSorted.isEmpty()) {
                   Set<String> allTags = new HashSet<>();
                   for (IdeaPluginDescriptor descriptor : CustomPluginRepositoryService.getInstance().getCustomRepositoryPlugins()) {
                     if (descriptor instanceof PluginNode) {
                       List<String> tags = ((PluginNode)descriptor).getTags();
-                      if (!ContainerUtil.isEmpty(tags)) {
+                      if (tags != null && !tags.isEmpty()) {
                         allTags.addAll(tags);
                       }
                     }
@@ -495,7 +474,7 @@ public class PluginManagerConfigurable
               case SORT_BY:
                 return Arrays.asList("downloads", "name", "rating", "updated");
               case ORGANIZATION:
-                if (ContainerUtil.isEmpty(myVendorsSorted)) { // XXX
+                if (myVendorsSorted == null || myVendorsSorted.isEmpty()) {
                   LinkedHashSet<String> vendors = new LinkedHashSet<>();
                   try {
                     ProcessIOExecutorService.INSTANCE.submit(() -> {
@@ -832,12 +811,12 @@ public class PluginManagerConfigurable
           }
 
           if (!downloaded.descriptors.isEmpty()) {
-            myUpdateAll.setListener(new LinkListener<Object>() {
+            myUpdateAll.setListener(new LinkListener<>() {
               @Override
               public void linkSelected(LinkLabel<Object> aSource, Object aLinkData) {
                 myUpdateAll.setEnabled(false);
 
-                for (UIPluginGroup group : myInstalledPanel.getGroups()) {
+                for (UIPluginGroup group : getInstalledGroups()) {
                   for (ListPluginComponent plugin : group.plugins) {
                     plugin.updatePlugin();
                   }
@@ -1184,7 +1163,7 @@ public class PluginManagerConfigurable
     }
   }
 
-  private static void applyUpdates(@NotNull PluginsGroupComponent panel, @NotNull Collection<IdeaPluginDescriptor> updates) {
+  private static void applyUpdates(@NotNull PluginsGroupComponent panel, @NotNull Collection<? extends IdeaPluginDescriptor> updates) {
     for (IdeaPluginDescriptor descriptor : updates) {
       for (UIPluginGroup group : panel.getGroups()) {
         ListPluginComponent component = group.findComponent(descriptor);
@@ -1397,9 +1376,46 @@ public class PluginManagerConfigurable
     }
   }
 
+  /**
+   * @deprecated Please use {@link #showPluginConfigurable(Project, Collection)}.
+   */
+  @Deprecated(since = "2020.2", forRemoval = true)
   public static void showPluginConfigurable(@Nullable Project project, IdeaPluginDescriptor @NotNull ... descriptors) {
+    showPluginConfigurable(project,
+                           ContainerUtil.map(descriptors, IdeaPluginDescriptor::getPluginId));
+  }
+
+  public static void showPluginConfigurable(@Nullable Project project,
+                                            @NotNull Collection<PluginId> pluginIds) {
     PluginManagerConfigurable configurable = new PluginManagerConfigurable(project);
-    ShowSettingsUtil.getInstance().editConfigurable(project, configurable, () -> configurable.select(descriptors));
+    ShowSettingsUtil.getInstance().editConfigurable(project,
+                                                    configurable,
+                                                    () -> configurable.select(pluginIds));
+  }
+
+  public static void showPluginConfigurable(@Nullable Component parent,
+                                            @Nullable Project project,
+                                            @NotNull Collection<PluginId> pluginIds) {
+    if (parent != null) {
+      PluginManagerConfigurable configurable = new PluginManagerConfigurable(project);
+      ShowSettingsUtil.getInstance().editConfigurable(parent,
+                                                      configurable,
+                                                      () -> configurable.select(pluginIds));
+    }
+    else {
+      showPluginConfigurable(project, pluginIds);
+    }
+  }
+
+  public static void showPluginConfigurableAndEnable(@Nullable Project project,
+                                                     @NotNull Set<? extends IdeaPluginDescriptor> descriptors) {
+    PluginManagerConfigurable configurable = new PluginManagerConfigurable(project);
+    ShowSettingsUtil.getInstance().editConfigurable(project,
+                                                    configurable,
+                                                    () -> {
+                                                      configurable.myPluginModel.enablePlugins(descriptors);
+                                                      configurable.select(descriptors);
+                                                    });
   }
 
   private enum SortBySearchOption {
@@ -1676,29 +1692,27 @@ public class PluginManagerConfigurable
     myPluginModel.clear(myCardPanel);
   }
 
-  @NotNull
-  public MyPluginModel getPluginModel() {
-    return myPluginModel;
+  /**
+   * @deprecated Please use {@link #select(Collection)}.
+   */
+  @Deprecated(since = "2020.2", forRemoval = true)
+  public void select(@NotNull IdeaPluginDescriptor @NotNull ... descriptors) {
+    select(ContainerUtil.newHashSet(descriptors));
   }
 
-  public void select(IdeaPluginDescriptor @NotNull ... descriptors) {
-    if (myTabHeaderComponent.getSelectionTab() != INSTALLED_TAB) {
-      myTabHeaderComponent.setSelectionWithEvents(INSTALLED_TAB);
-    }
+  private void select(@NotNull Set<? extends IdeaPluginDescriptor> descriptors) {
+    select(ContainerUtil.map(descriptors, IdeaPluginDescriptor::getPluginId));
+  }
 
-    if (descriptors.length == 0) {
-      return;
-    }
+  private void select(@NotNull Collection<PluginId> pluginIds) {
+    updateSelectionTab(INSTALLED_TAB);
 
     List<ListPluginComponent> components = new ArrayList<>();
 
-    for (IdeaPluginDescriptor descriptor : descriptors) {
-      for (UIPluginGroup group : myInstalledPanel.getGroups()) {
-        ListPluginComponent component = group.findComponent(descriptor);
-        if (component != null) {
-          components.add(component);
-          break;
-        }
+    for (PluginId pluginId : pluginIds) {
+      ListPluginComponent component = findInstalledPluginById(pluginId);
+      if (component != null) {
+        components.add(component);
       }
     }
 
@@ -1720,11 +1734,7 @@ public class PluginManagerConfigurable
 
     return () -> {
       boolean marketplace = option != null && option.startsWith(SearchWords.TAG.getValue());
-      int tabIndex = marketplace ? MARKETPLACE_TAB : INSTALLED_TAB;
-
-      if (myTabHeaderComponent.getSelectionTab() != tabIndex) {
-        myTabHeaderComponent.setSelectionWithEvents(tabIndex);
-      }
+      updateSelectionTab(marketplace ? MARKETPLACE_TAB : INSTALLED_TAB);
 
       PluginsTab tab = marketplace ? myMarketplaceTab : myInstalledTab;
       tab.clearSearchPanel(option);
@@ -1745,22 +1755,37 @@ public class PluginManagerConfigurable
 
         boolean select = myInstalledPanel == null;
 
-        if (myTabHeaderComponent.getSelectionTab() != INSTALLED_TAB) {
-          myTabHeaderComponent.setSelectionWithEvents(INSTALLED_TAB);
-        }
+        updateSelectionTab(INSTALLED_TAB);
 
         myInstalledTab.clearSearchPanel("");
 
         if (select) {
-          for (UIPluginGroup group : myInstalledPanel.getGroups()) {
-            ListPluginComponent component = group.findComponent(callbackData.getPluginDescriptor());
-            if (component != null) {
-              myInstalledPanel.setSelection(component);
-              break;
-            }
+          ListPluginComponent component = findInstalledPluginById(callbackData.getPluginDescriptor().getPluginId());
+          if (component != null) {
+            myInstalledPanel.setSelection(component);
           }
         }
       });
     }
+  }
+
+  private void updateSelectionTab(int tab) {
+    if (myTabHeaderComponent.getSelectionTab() != tab) {
+      myTabHeaderComponent.setSelectionWithEvents(tab);
+    }
+  }
+
+  private @NotNull List<UIPluginGroup> getInstalledGroups() {
+    return myInstalledPanel.getGroups();
+  }
+
+  private @Nullable ListPluginComponent findInstalledPluginById(@NotNull PluginId pluginId) {
+    for (UIPluginGroup group : getInstalledGroups()) {
+      ListPluginComponent component = group.findComponent(pluginId);
+      if (component != null) {
+        return component;
+      }
+    }
+    return null;
   }
 }

@@ -67,19 +67,16 @@ public final class PluginManager {
     return Files.isRegularFile(onceInstalledFile) ? onceInstalledFile : null;
   }
 
-  // not in PluginManagerCore because it is helper method
-  public static @Nullable IdeaPluginDescriptorImpl loadDescriptor(@NotNull Path file, @NotNull String fileName) {
-    return loadDescriptor(file, fileName, DisabledPluginsState.disabledPlugins(), false, PathBasedJdomXIncluder.DEFAULT_PATH_RESOLVER);
-  }
-
   public static @Nullable IdeaPluginDescriptorImpl loadDescriptor(@NotNull Path file,
-                                                                  @NotNull String fileName,
                                                                   @NotNull Set<PluginId> disabledPlugins,
                                                                   boolean bundled,
                                                                   PathBasedJdomXIncluder.PathResolver<?> pathResolver) {
     DescriptorListLoadingContext parentContext = DescriptorListLoadingContext.createSingleDescriptorContext(disabledPlugins);
     try (DescriptorLoadingContext context = new DescriptorLoadingContext(parentContext, bundled, false, pathResolver)) {
-      return PluginDescriptorLoader.loadDescriptorFromFileOrDir(file, fileName, context, Files.isDirectory(file));
+      return PluginDescriptorLoader.loadDescriptorFromFileOrDir(file,
+                                                                PluginManagerCore.PLUGIN_XML,
+                                                                context,
+                                                                Files.isDirectory(file));
     }
   }
 
@@ -87,6 +84,7 @@ public final class PluginManager {
    * @deprecated In a plugin code simply throw error or log using {@link Logger#error(Throwable)}.
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static void processException(@NotNull Throwable t) {
     try {
       Class<?> aClass = PluginManager.class.getClassLoader().loadClass("com.intellij.ide.plugins.StartupAbortedException");

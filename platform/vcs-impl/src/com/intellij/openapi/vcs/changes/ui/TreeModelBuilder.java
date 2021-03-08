@@ -17,6 +17,7 @@ import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.MultiMap;
 import com.intellij.util.ui.tree.TreeUtil;
 import com.intellij.vcsUtil.VcsUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -81,6 +82,7 @@ public class TreeModelBuilder implements ChangesViewModelBuilder {
    * @deprecated Use {@link #TreeModelBuilder(Project, ChangesGroupingPolicyFactory)}.
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public TreeModelBuilder(@NotNull Project project, boolean showFlatten) {
     this(project, ChangesGroupingSupport.getFactory(showFlatten ? NONE_GROUPING : DIRECTORY_GROUPING));
   }
@@ -98,20 +100,6 @@ public class TreeModelBuilder implements ChangesViewModelBuilder {
   @NotNull
   public static DefaultTreeModel buildEmpty() {
     return new DefaultTreeModel(ChangesBrowserNode.createRoot());
-  }
-
-  /**
-   * @deprecated Use {@link TreeModelBuilder#buildFromChanges(Project, ChangesGroupingPolicyFactory, Collection, ChangeNodeDecorator)}.
-   */
-  @Deprecated
-  @NotNull
-  public static DefaultTreeModel buildFromChanges(@NotNull Project project,
-                                                  boolean showFlatten,
-                                                  @NotNull Collection<? extends Change> changes,
-                                                  @Nullable ChangeNodeDecorator changeNodeDecorator) {
-    return new TreeModelBuilder(project, showFlatten)
-      .setChanges(changes, changeNodeDecorator)
-      .build();
   }
 
   @NotNull
@@ -283,21 +271,37 @@ public class TreeModelBuilder implements ChangesViewModelBuilder {
     return createTagNode(new ChangesBrowserNode.TagImpl(tag));
   }
 
+  /**
+   * @deprecated Use {@link #createTagNode(ChangesBrowserNode.Tag)} instead.
+   */
+  @NotNull
+  @Deprecated
+  public ChangesBrowserNode<?> createTagNode(@Nullable Object tag) {
+    return createTagNode(ChangesBrowserNode.WrapperTag.wrap(tag));
+  }
+
   @NotNull
   public ChangesBrowserNode<?> createTagNode(@Nullable ChangesBrowserNode.Tag tag) {
-    return createTagNode(tag, true);
+    return createTagNode(tag, SimpleTextAttributes.REGULAR_ATTRIBUTES, true);
   }
 
   @NotNull
   public ChangesBrowserNode<?> createTagNode(@NotNull @Nls String tag, boolean expandByDefault) {
-    return createTagNode(new ChangesBrowserNode.TagImpl(tag), expandByDefault);
+    return createTagNode(tag, SimpleTextAttributes.REGULAR_ATTRIBUTES, expandByDefault);
   }
 
   @NotNull
-  public ChangesBrowserNode<?> createTagNode(@Nullable ChangesBrowserNode.Tag tag, boolean expandByDefault) {
+  public ChangesBrowserNode<?> createTagNode(@NotNull @Nls String tag, @NotNull SimpleTextAttributes attributes, boolean expandByDefault) {
+    return createTagNode(new ChangesBrowserNode.TagImpl(tag), attributes, expandByDefault);
+  }
+
+  @NotNull
+  public ChangesBrowserNode<?> createTagNode(@Nullable ChangesBrowserNode.Tag tag,
+                                             @NotNull SimpleTextAttributes attributes,
+                                             boolean expandByDefault) {
     if (tag == null) return myRoot;
 
-    ChangesBrowserNode<?> subtreeRoot = new TagChangesBrowserNode(tag, expandByDefault);
+    ChangesBrowserNode<?> subtreeRoot = new TagChangesBrowserNode(tag, attributes, expandByDefault);
     subtreeRoot.markAsHelperNode();
 
     insertSubtreeRoot(subtreeRoot);
@@ -349,8 +353,9 @@ public class TreeModelBuilder implements ChangesViewModelBuilder {
   @NotNull
   public TreeModelBuilder setSwitchedRoots(@Nullable Map<VirtualFile, @NlsSafe String> switchedRoots) {
     if (ContainerUtil.isEmpty(switchedRoots)) return this;
-    ChangesBrowserNode<?> rootsHeadNode = createTagNode(ChangesBrowserNode.SWITCHED_ROOTS_TAG);
-    rootsHeadNode.setAttributes(SimpleTextAttributes.GRAYED_BOLD_ATTRIBUTES);
+    ChangesBrowserNode<?> rootsHeadNode = createTagNode(ChangesBrowserNode.SWITCHED_ROOTS_TAG,
+                                                        SimpleTextAttributes.GRAYED_BOLD_ATTRIBUTES,
+                                                        true);
 
     List<VirtualFile> files = sorted(switchedRoots.keySet(), VirtualFileHierarchicalComparator.getInstance());
 
@@ -563,16 +568,19 @@ public class TreeModelBuilder implements ChangesViewModelBuilder {
 
   @NotNull
   private static ChangesBrowserNode<?> createPathNode(@NotNull StaticFilePath path) {
-    FilePath filePath = VcsUtil.getFilePath(path.getPath(), path.isDirectory());
-    return ChangesBrowserNode.createFilePath(filePath);
+    return ChangesBrowserNode.createFilePath(path.getFilePath());
   }
 
   public boolean isEmpty() {
     return myModel.getChildCount(myRoot) == 0;
   }
 
+  /**
+   * @deprecated Use {@link #setChanges(Collection, ChangeNodeDecorator)} directly.
+   */
   @NotNull
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public DefaultTreeModel buildModel(@NotNull List<? extends Change> changes, @Nullable ChangeNodeDecorator changeNodeDecorator) {
     return setChanges(changes, changeNodeDecorator).build();
   }

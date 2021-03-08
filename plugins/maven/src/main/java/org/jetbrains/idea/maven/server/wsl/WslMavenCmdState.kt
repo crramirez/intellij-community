@@ -1,6 +1,7 @@
 // Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.idea.maven.server.wsl
 
+import com.intellij.execution.CommandLineUtil
 import com.intellij.execution.configurations.SimpleJavaParameters
 import com.intellij.execution.process.ProcessHandler
 import com.intellij.execution.rmi.RemoteServer
@@ -15,14 +16,15 @@ import com.intellij.openapi.projectRoots.Sdk
 import org.jetbrains.idea.maven.project.MavenProjectsManager
 import org.jetbrains.idea.maven.server.MavenDistribution
 import org.jetbrains.idea.maven.server.MavenServerCMDState
+import org.jetbrains.idea.maven.server.WslMavenDistribution
 import org.jetbrains.idea.maven.utils.MavenLog
 import org.jetbrains.idea.maven.utils.MavenProgressIndicator
-import org.jetbrains.idea.maven.utils.MavenWslUtl.getPropertiesFromMavenOpts
+import org.jetbrains.idea.maven.utils.MavenWslUtil.getPropertiesFromMavenOpts
 
 class WslMavenCmdState(private val myWslDistribution: WSLDistribution,
                        jdk: Sdk,
                        vmOptions: String?,
-                       mavenDistribution: MavenDistribution,
+                       mavenDistribution: WslMavenDistribution,
                        debugPort: Int?,
                        val myProject: Project,
                        val remoteHost: String
@@ -33,11 +35,11 @@ class WslMavenCmdState(private val myWslDistribution: WSLDistribution,
   }
 
   override fun getWorkingDirectory(): String {
-    return myWslDistribution.userHome?: "/";
+    return myWslDistribution.userHome?: "/"
   }
 
   override fun createJavaParameters(): SimpleJavaParameters {
-    val parameters = super.createJavaParameters();
+    val parameters = super.createJavaParameters()
     val wslParams = toWslParameters(parameters)
     wslParams.vmParametersList.add("-D${RemoteServer.SERVER_HOSTNAME}=${remoteHost}")
     wslParams.vmParametersList.add("-Didea.maven.knownPort=true")
@@ -56,7 +58,8 @@ class WslMavenCmdState(private val myWslDistribution: WSLDistribution,
     }
     wslParams.charset = parameters.charset
     wslParams.vmParametersList.add("-classpath")
-    wslParams.vmParametersList.add(parameters.classPath.pathList.map(myWslDistribution::getWslPath).joinToString(":"))
+    wslParams.vmParametersList.add(parameters.classPath.pathList
+                                     .mapNotNull(myWslDistribution::getWslPath).joinToString(":"))
     return wslParams
   }
 
@@ -65,9 +68,9 @@ class WslMavenCmdState(private val myWslDistribution: WSLDistribution,
     val myEnvFactory = WslTargetEnvironmentFactory(wslConfig)
 
     val wslParams = createJavaParameters()
-    val request = myEnvFactory.createRequest();
+    val request = myEnvFactory.createRequest()
     val languageRuntime = JavaLanguageRuntimeConfiguration()
-    languageRuntime.homePath = "/usr";
+    languageRuntime.homePath = "/usr"
     myEnvFactory.targetConfiguration.addLanguageRuntime(languageRuntime)
     val setup = JdkCommandLineSetup(request, myEnvFactory.targetConfiguration)
     setup.setupCommandLine(wslParams)

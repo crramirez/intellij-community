@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ide
 
 import com.intellij.application.options.editor.CheckboxDescriptor
@@ -29,14 +29,16 @@ private val myChkUseSafeWrite                     get() = CheckboxDescriptor(Ide
 // @formatter:on
 
 internal val allOptionDescriptors
-  get() = listOf(
+  get() = sequenceOf(
     myChkReopenLastProject,
     myConfirmExit,
     myChkSyncOnFrameActivation,
     myChkSaveOnFrameDeactivation,
     myChkAutoSaveIfInactive,
     myChkUseSafeWrite
-  ).map { it.asUiOptionDescriptor() }
+  )
+    .map { it.asUiOptionDescriptor() }
+    .toList()
 
 /**
  * To provide additional options in General section register implementation of {@link SearchableConfigurable} in the plugin.xml:
@@ -58,16 +60,18 @@ class GeneralSettingsConfigurable: BoundCompositeSearchableConfigurable<Searchab
       row {
         checkBox(myConfirmExit)
       }
+
       row {
         cell {
           label(IdeBundle.message("group.settings.process.tab.close"))
           buttonGroup(model::getProcessCloseConfirmation, model::setProcessCloseConfirmation) {
             radioButton(IdeBundle.message("radio.process.close.terminate"), GeneralSettings.ProcessCloseConfirmation.TERMINATE)
-            radioButton(IdeBundle.message("radio.process.close.disaconnect"), GeneralSettings.ProcessCloseConfirmation.DISCONNECT)
+            radioButton(IdeBundle.message("radio.process.close.disconnect"), GeneralSettings.ProcessCloseConfirmation.DISCONNECT)
             radioButton(IdeBundle.message("radio.process.close.ask"), GeneralSettings.ProcessCloseConfirmation.ASK)
           }
         }
       }
+
       titledRow(IdeUICustomization.getInstance().projectMessage("tab.title.project")) {
         row {
           checkBox(myChkReopenLastProject)
@@ -83,7 +87,7 @@ class GeneralSettingsConfigurable: BoundCompositeSearchableConfigurable<Searchab
           }
         }
 
-        if (PlatformUtils.isDataGrip()) {
+        if (PlatformUtils.isPyCharmDs()) {
           row {
             checkBox(mySkipWelcomeScreen)
           }
@@ -99,11 +103,13 @@ class GeneralSettingsConfigurable: BoundCompositeSearchableConfigurable<Searchab
           }
         }
       }
+
       titledRow(IdeBundle.message("settings.general.synchronization")) {
         row {
           cell(isFullWidth = true) {
             val autoSaveCheckbox = checkBox(myChkAutoSaveIfInactive)
             intTextField(model::getInactiveTimeout, model::setInactiveTimeout, columns = 4).enableIf(autoSaveCheckbox.selected)
+            @Suppress("DialogTitleCapitalization")
             label(IdeBundle.message("label.inactive.timeout.sec"))
           }
         }

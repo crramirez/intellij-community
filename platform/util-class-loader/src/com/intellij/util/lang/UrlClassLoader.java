@@ -2,7 +2,6 @@
 package com.intellij.util.lang;
 
 import com.intellij.ReviseWhenPortedToJDK;
-import com.intellij.openapi.diagnostic.LoggerRt;
 import com.intellij.openapi.util.text.StringUtilRt;
 import com.intellij.util.UrlUtilRt;
 import org.jetbrains.annotations.ApiStatus;
@@ -12,6 +11,8 @@ import org.jetbrains.annotations.Nullable;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.lang.reflect.Field;
 import java.net.MalformedURLException;
 import java.net.URL;
@@ -21,6 +22,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.ProtectionDomain;
 import java.util.*;
+import java.util.function.BiConsumer;
 import java.util.function.Predicate;
 
 /**
@@ -45,10 +47,7 @@ public class UrlClassLoader extends ClassLoader implements ClassPath.ClassDataCo
    */
   @SuppressWarnings("unused")
   final void appendToClassPathForInstrumentation(@NotNull String jar) {
-    Path file = Paths.get(jar);
-    //noinspection deprecation
-    classPath.addURL(file);
-    files.add(file);
+    addFiles(Collections.singletonList(Paths.get(jar)));
   }
 
   /**
@@ -164,9 +163,13 @@ public class UrlClassLoader extends ClassLoader implements ClassPath.ClassDataCo
   /** @deprecated adding URLs to a classloader at runtime could lead to hard-to-debug errors */
   @Deprecated
   public final void addURL(@NotNull URL url) {
-    Path file = Paths.get(url.getPath());
-    classPath.addURL(file);
-    files.add(file);
+    addFiles(Collections.singletonList(Paths.get(url.getPath())));
+  }
+
+  @ApiStatus.Internal
+  public final void addFiles(@NotNull List<Path> files) {
+    classPath.addFiles(files);
+    this.files.addAll(files);
   }
 
   public final @NotNull List<URL> getUrls() {
@@ -192,7 +195,13 @@ public class UrlClassLoader extends ClassLoader implements ClassPath.ClassDataCo
 
   @Override
   protected Class<?> findClass(@NotNull String name) throws ClassNotFoundException {
-    Class<?> clazz = classPath.findClass(name);
+    Class<?> clazz;
+    try {
+      clazz = classPath.findClass(name);
+    }
+    catch (IOException e) {
+      throw new ClassNotFoundException(name, e);
+    }
     if (clazz == null) {
       throw new ClassNotFoundException(name);
     }
@@ -261,40 +270,25 @@ public class UrlClassLoader extends ClassLoader implements ClassPath.ClassDataCo
   }
 
   @Override
-  public URL findResource(String name) {
+  public @Nullable URL findResource(@NotNull String name) {
     if (skipFindingResource.get() != null) {
       return null;
     }
-    Resource resource = findResourceImpl(name);
-    return resource == null ? null : resource.getURL();
-  }
-
-  private @Nullable Resource findResourceImpl(@NotNull String name) {
-    String n = toCanonicalPath(name);
-    Resource resource = classPath.getResource(n);
-    // compatibility with existing code, non-standard classloader behavior
-    if (resource == null && n.startsWith("/")) {
-      return classPath.getResource(n.substring(1));
-    }
-    return resource;
+    Resource resource = doFindResource(name);
+    return resource != null ? resource.getURL() : null;
   }
 
   @Override
-  public @Nullable InputStream getResourceAsStream(String name) {
-    String normalizedName = toCanonicalPath(name);
-    Resource resource = classPath.getResource(normalizedName);
-    // compatibility with existing code, non-standard classloader behavior
+  public @Nullable InputStream getResourceAsStream(@NotNull String name) {
+    Resource resource = doFindResource(name);
     if (resource != null) {
       try {
         return resource.getInputStream();
       }
       catch (IOException e) {
-        LoggerRt.getInstance(UrlClassLoader.class).error("Cannot load resource " + normalizedName, e);
+        logError("Cannot load resource " + name, e);
+        return null;
       }
-    }
-
-    if (normalizedName.startsWith("/")) {
-      throw new IllegalArgumentException("Do not request resource from classloader using path with leading slash");
     }
 
     if (isBootstrapResourcesAllowed) {
@@ -316,8 +310,27 @@ public class UrlClassLoader extends ClassLoader implements ClassPath.ClassDataCo
     return null;
   }
 
+  private @Nullable Resource doFindResource(@NotNull String name) {
+    String canonicalPath = toCanonicalPath(name);
+    Resource resource = classPath.findResource(canonicalPath);
+    if (resource == null && canonicalPath.startsWith("/")) {
+      //noinspection SpellCheckingInspection
+      if (!canonicalPath.startsWith("/org/bridj/")) {
+        logError("Do not request resource from classloader using path with leading slash", new IllegalArgumentException(name));
+      }
+      resource = classPath.findResource(canonicalPath.substring(1));
+    }
+    return resource;
+  }
+
+  public final void processResources(@NotNull String dir,
+                                     @NotNull Predicate<? super String> fileNameFilter,
+                                     @NotNull BiConsumer<? super String, ? super InputStream> consumer) throws IOException {
+    classPath.processResources(dir, fileNameFilter, consumer);
+  }
+
   @Override
-  protected Enumeration<URL> findResources(String name) throws IOException {
+  protected @NotNull Enumeration<URL> findResources(@NotNull String name) throws IOException {
     return classPath.getResources(name);
   }
 
@@ -326,7 +339,7 @@ public class UrlClassLoader extends ClassLoader implements ClassPath.ClassDataCo
     return classLoadingLocks == null ? this : classLoadingLocks.getOrCreateLock(className);
   }
 
-  public @Nullable Class<?> loadClassInsideSelf(@NotNull String name, boolean forceLoadFromSubPluginClassloader) {
+  public @Nullable Class<?> loadClassInsideSelf(@NotNull String name, boolean forceLoadFromSubPluginClassloader) throws IOException {
     synchronized (getClassLoadingLock(name)) {
       Class<?> c = findLoadedClass(name);
       if (c != null) {
@@ -486,6 +499,22 @@ public class UrlClassLoader extends ClassLoader implements ClassPath.ClassDataCo
     return 0;
   }
 
+  @SuppressWarnings({"UseOfSystemOutOrSystemErr", "SameParameterValue"})
+  private void logError(String message, Throwable t) {
+    try {
+      Class<?> logger = Class.forName("com.intellij.openapi.diagnostic.Logger", false, this);
+      MethodHandles.Lookup lookup = MethodHandles.lookup();
+      Object instance = lookup.findStatic(logger, "getInstance", MethodType.methodType(logger, Class.class)).invoke(getClass());
+      lookup.findVirtual(logger, "error", MethodType.methodType(void.class, String.class, Throwable.class))
+        .bindTo(instance)
+        .invokeExact(message, t);
+    }
+    catch (Throwable tt) {
+      tt.addSuppressed(t);
+      tt.printStackTrace(System.err);
+    }
+  }
+
   // work around corrupted URLs produced by File.getURL()
   // public for test
   public static @NotNull String urlToFilePath(@NotNull String url) {
@@ -513,18 +542,18 @@ public class UrlClassLoader extends ClassLoader implements ClassPath.ClassDataCo
     boolean isBootstrapResourcesAllowed;
     boolean errorOnMissingJar = true;
     @Nullable CachePoolImpl cachePool;
-    @Nullable Predicate<Path> cachingCondition;
+    Predicate<? super Path> cachingCondition;
 
     Builder() { }
 
     /**
-     * @deprecated Use {@link #files(List)}. Using of {@link URL} is discouraged in favor of modern {@lin Path}.
+     * @deprecated Use {@link #files(List)}. Using of {@link URL} is discouraged in favor of modern {@link Path}.
      */
     @Deprecated
     public @NotNull UrlClassLoader.Builder urls(@NotNull List<URL> urls) {
       List<Path> files = new ArrayList<>(urls.size());
       for (URL url : urls) {
-        files.add(Paths.get(url.getPath()));
+        files.add(Paths.get(urlToFilePath(url.getPath())));
       }
       this.files = files;
       return this;
@@ -592,7 +621,7 @@ public class UrlClassLoader extends ClassLoader implements ClassPath.ClassDataCo
      * @param pool      cache pool
      * @param condition a custom policy to provide a possibility to prohibit caching for some URLs.
      */
-    public @NotNull UrlClassLoader.Builder useCache(@NotNull UrlClassLoader.CachePool pool, @NotNull Predicate<Path> condition) {
+    public @NotNull UrlClassLoader.Builder useCache(@NotNull UrlClassLoader.CachePool pool, @NotNull Predicate<? super Path> condition) {
       useCache = true;
       cachePool = (CachePoolImpl)pool;
       cachingCondition = condition;

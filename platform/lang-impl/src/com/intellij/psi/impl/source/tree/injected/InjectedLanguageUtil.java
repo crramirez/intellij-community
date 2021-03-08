@@ -26,7 +26,6 @@ import com.intellij.psi.*;
 import com.intellij.psi.impl.BooleanRunnable;
 import com.intellij.psi.impl.PsiDocumentManagerBase;
 import com.intellij.psi.tree.IElementType;
-import com.intellij.util.DeprecatedMethodException;
 import com.intellij.util.ObjectUtils;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
@@ -40,7 +39,6 @@ import java.util.List;
  */
 @Deprecated
 public final class InjectedLanguageUtil extends InjectedLanguageUtilBase {
-  public static final Key<IElementType> INJECTED_FRAGMENT_TYPE = Key.create("INJECTED_FRAGMENT_TYPE");
   public static final Key<Boolean> FRANKENSTEIN_INJECTION = InjectedLanguageManager.FRANKENSTEIN_INJECTION;
 
   private static final Comparator<PsiFile> LONGEST_INJECTION_HOST_RANGE_COMPARATOR = Comparator.comparing(
@@ -249,33 +247,6 @@ public final class InjectedLanguageUtil extends InjectedLanguageUtilBase {
     return unescaped - shreds.get(shreds.size() - 1).getSuffix().length();
   }
 
-  public static String getUnescapedText(@NotNull PsiFile file, @Nullable final PsiElement startElement, @Nullable final PsiElement endElement) {
-    final InjectedLanguageManager manager = InjectedLanguageManager.getInstance(file.getProject());
-    if (manager.getInjectionHost(file) == null) {
-      return file.getText().substring(startElement == null ? 0 : startElement.getTextRange().getStartOffset(),
-                                      endElement == null ? file.getTextLength() : endElement.getTextRange().getStartOffset());
-    }
-    final StringBuilder sb = new StringBuilder();
-    file.accept(new PsiRecursiveElementWalkingVisitor() {
-
-      Boolean myState = startElement == null ? Boolean.TRUE : null;
-
-      @Override
-      public void visitElement(@NotNull PsiElement element) {
-        if (element == startElement) myState = Boolean.TRUE;
-        if (element == endElement) myState = Boolean.FALSE;
-        if (Boolean.FALSE == myState) return;
-        if (Boolean.TRUE == myState && element.getFirstChild() == null) {
-          sb.append(getUnescapedLeafText(element, false));
-        }
-        else {
-          super.visitElement(element);
-        }
-      }
-    });
-    return sb.toString();
-  }
-
   @Nullable
   public static DocumentWindow getDocumentWindow(@NotNull PsiElement element) {
     PsiFile file = element.getContainingFile();
@@ -309,20 +280,6 @@ public final class InjectedLanguageUtil extends InjectedLanguageUtilBase {
                                                  @Nullable T value) {
     PsiFile file = getCachedInjectedFileWithLanguage(element, language);
     if (file != null) {
-      file.putUserData(key, value);
-    }
-  }
-
-  /**
-   * @deprecated use {@link #putInjectedFileUserData(PsiElement, Language, Key, Object)} instead
-   */
-  @Deprecated
-  public static <T> void putInjectedFileUserData(MultiHostRegistrar registrar, Key<T> key, T value) {
-    DeprecatedMethodException.report("use putInjectedFileUserData(PsiElement, Language, Key, Object)} instead");
-    InjectionResult result = ((InjectionRegistrarImpl)registrar).getInjectedResult();
-    if (result != null && result.files != null) {
-      List<? extends PsiFile> files = result.files;
-      PsiFile file = files.get(files.size() - 1);
       file.putUserData(key, value);
     }
   }

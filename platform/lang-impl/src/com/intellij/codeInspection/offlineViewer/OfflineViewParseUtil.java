@@ -8,6 +8,7 @@ import com.intellij.openapi.util.NlsSafe;
 import com.intellij.util.containers.Interner;
 import com.thoughtworks.xstream.io.xml.XppReader;
 import gnu.trove.TObjectIntHashMap;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.Nullable;
 import org.xmlpull.mxp1.MXParser;
@@ -20,6 +21,7 @@ public final class OfflineViewParseUtil {
   @NonNls private static final String DESCRIPTION = "description";
   @NonNls private static final String HINTS = "hints";
   @NonNls private static final String LINE = "line";
+  @NonNls private static final String OFFSET = "offset";
   @NonNls private static final String MODULE = "module";
 
   private OfflineViewParseUtil() {
@@ -33,6 +35,7 @@ public final class OfflineViewParseUtil {
    * @deprecated use {@link #parse(File)} or {@link #parse(Reader)}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public static Map<String, Set<OfflineProblemDescriptor>> parse(String problemText) {
     return parse(new StringReader(problemText));
   }
@@ -66,6 +69,9 @@ public final class OfflineViewParseUtil {
           }
           if (LINE.equals(reader.getNodeName())) {
             descriptor.setLine(Integer.parseInt(reader.getValue()));
+          }
+          if(OFFSET.equals(reader.getNodeName())) {
+            descriptor.setOffset(Integer.parseInt(reader.getValue()));
           }
           if (MODULE.equals(reader.getNodeName())) {
             descriptor.setModule(stringInterner.intern(reader.getValue()));
@@ -116,6 +122,7 @@ public final class OfflineViewParseUtil {
    * @deprecated use {@link #parseProfileName(File)} or {@link #parseProfileName(Reader)}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   @Nullable
   public static String parseProfileName(String descriptorText) {
     return parseProfileName(new StringReader(descriptorText));

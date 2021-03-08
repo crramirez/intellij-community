@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.psi.util;
 
 import com.intellij.core.JavaPsiBundle;
@@ -35,7 +35,12 @@ public enum JavaElementKind {
   RECORD_COMPONENT("element.record_component"),
   STATEMENT("element.statement"),
   UNKNOWN("element.unknown"),
-  VARIABLE("element.variable");
+  VARIABLE("element.variable"),
+  THROWS_LIST("element.throws.list"),
+  EXTENDS_LIST("element.extends.list"),
+  RECEIVER_PARAMETER("element.receiver.parameter"),
+  METHOD_CALL("element.method.call"),
+  TYPE_ARGUMENTS("element.type.arguments");
   
   private final @PropertyKey(resourceBundle = JavaPsiBundle.BUNDLE) String propertyKey;
 
@@ -122,6 +127,18 @@ public enum JavaElementKind {
       }
       return FIELD;
     }
+    if (element instanceof PsiReferenceParameterList) {
+      return TYPE_ARGUMENTS;
+    }
+    if (element instanceof PsiReferenceList) {
+      PsiReferenceList.Role role = ((PsiReferenceList)element).getRole();
+      if (role == PsiReferenceList.Role.THROWS_LIST) {
+        return THROWS_LIST;
+      }
+      if (role == PsiReferenceList.Role.EXTENDS_LIST) {
+        return EXTENDS_LIST;
+      }
+    }
     if (element instanceof PsiAnnotation) {
       return ANNOTATION;
     }
@@ -136,6 +153,9 @@ public enum JavaElementKind {
     }
     if (element instanceof PsiParameter) {
       return PARAMETER;
+    }
+    if (element instanceof PsiReceiverParameter) {
+      return RECEIVER_PARAMETER;
     }
     if (element instanceof PsiVariable) {
       return VARIABLE;
@@ -154,6 +174,9 @@ public enum JavaElementKind {
     }
     if (element instanceof PsiStatement) {
       return STATEMENT;
+    }
+    if (element instanceof PsiMethodCallExpression) {
+      return METHOD_CALL;
     }
     if (element instanceof PsiExpression) {
       return EXPRESSION;

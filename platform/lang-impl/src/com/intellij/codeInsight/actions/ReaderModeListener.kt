@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight.actions
 
 import com.intellij.application.options.colors.ReaderModeStatsCollector
@@ -13,7 +13,7 @@ import com.intellij.openapi.editor.ex.EditorSettingsExternalizable
 import com.intellij.openapi.editor.impl.EditorImpl
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
-import com.intellij.openapi.fileEditor.impl.text.PsiAwareTextEditorImpl
+import com.intellij.openapi.fileEditor.TextEditor
 import com.intellij.openapi.options.ex.Settings
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
@@ -38,7 +38,7 @@ class ReaderModeSettingsListener : ReaderModeListener {
 
     fun applyToAllEditors(project: Project, preferGlobalSettings: Boolean = false) {
       FileEditorManager.getInstance(project).allEditors.forEach {
-        if (it !is PsiAwareTextEditorImpl) return
+        if (it !is TextEditor) return
         applyReaderMode(project, it.editor, it.file, fileIsOpenAlready = true, preferGlobalSettings = preferGlobalSettings)
       }
 
@@ -69,7 +69,7 @@ class ReaderModeSettingsListener : ReaderModeListener {
   override fun modeChanged(project: Project) = applyToAllEditors(project)
 }
 
-class ReaderModeEditorSettingsListener : StartupActivity, DumbAware {
+internal class ReaderModeEditorSettingsListener : StartupActivity, DumbAware {
   override fun runActivity(project: Project) {
     val propertyChangeListener = PropertyChangeListener { event ->
       when (event.propertyName) {
@@ -79,8 +79,7 @@ class ReaderModeEditorSettingsListener : StartupActivity, DumbAware {
         }
       }
     }
-    EditorSettingsExternalizable.getInstance().addPropertyChangeListener(propertyChangeListener)
-    Disposer.register(project) { EditorSettingsExternalizable.getInstance().removePropertyChangeListener(propertyChangeListener) }
+    EditorSettingsExternalizable.getInstance().addPropertyChangeListener(propertyChangeListener, project)
 
     val fontPreferences = AppEditorFontOptions.getInstance().fontPreferences as FontPreferencesImpl
     fontPreferences.changeListener = Runnable {

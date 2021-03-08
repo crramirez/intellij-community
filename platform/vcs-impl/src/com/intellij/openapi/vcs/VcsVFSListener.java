@@ -29,6 +29,7 @@ import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.SmartHashSet;
 import com.intellij.vcsUtil.VcsUtil;
 import kotlin.Unit;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -265,7 +266,8 @@ public abstract class VcsVFSListener implements Disposable {
       if (file.isDirectory() && file instanceof NewVirtualFile && !isDirectoryVersioningSupported() && !isRecursiveDeleteSupported()) {
         for (VirtualFile child : ((NewVirtualFile)file).getCachedChildren()) {
           ProgressManager.checkCanceled();
-          if (!myChangeListManager.isIgnoredFile(child)) {
+          FileStatus status = myChangeListManager.getStatus(child);
+          if (!filterOutByStatus(status)) {
             processDeletedFile(child);
           }
         }
@@ -275,6 +277,9 @@ public abstract class VcsVFSListener implements Disposable {
         if (type == VcsDeleteType.IGNORE) return;
 
         FilePath filePath = VcsUtil.getFilePath(file);
+        FileStatus status = myChangeListManager.getStatus(filePath);
+        if (filterOutByStatus(status)) return;
+
         withLock(PROCESSING_LOCK.writeLock(), () -> {
           if (type == VcsDeleteType.CONFIRM) {
             myDeletedFiles.add(filePath);
@@ -292,7 +297,7 @@ public abstract class VcsVFSListener implements Disposable {
 
       String newPath = newParentPath + "/" + newName;
       withLock(PROCESSING_LOCK.writeLock(), () -> {
-        if (!(filterOutUnknownFiles() && status == FileStatus.UNKNOWN) && status != FileStatus.IGNORED) {
+        if (!filterOutByStatus(status)) {
           MovedFileInfo existingMovedFile = ContainerUtil.find(myMovedFiles, info -> Comparing.equal(info.myFile, file));
           if (existingMovedFile != null) {
             LOG.debug("Reusing existing moved file [" + file + "] with new path [" + newPath + "]");
@@ -381,6 +386,7 @@ public abstract class VcsVFSListener implements Disposable {
    * @deprecated Use {@link #VcsVFSListener(AbstractVcs)} followed by {@link #installListeners()}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   protected VcsVFSListener(@NotNull Project project, @NotNull AbstractVcs vcs) {
     this(vcs);
     installListeners();
@@ -488,6 +494,9 @@ public abstract class VcsVFSListener implements Disposable {
     List<FilePath> filesToDelete = allFiles.deletedWithoutConfirmFiles;
     List<FilePath> deletedFiles = allFiles.deletedFiles;
 
+    filesToDelete.removeIf(myVcsIgnoreManager::isPotentiallyIgnoredFile);
+    deletedFiles.removeIf(myVcsIgnoreManager::isPotentiallyIgnoredFile);
+
     VcsShowConfirmationOption.Value removeOption = myRemoveOption.getValue();
     if (removeOption == VcsShowConfirmationOption.Value.DO_ACTION_SILENTLY) {
       filesToDelete.addAll(deletedFiles);
@@ -584,8 +593,21 @@ public abstract class VcsVFSListener implements Disposable {
     }
   }
 
+  /**
+   * Determine if the listener should process files with {@link FileStatus#UNKNOWN} status.
+   *
+   * @see #filterOutByStatus(FileStatus)
+   */
   protected boolean filterOutUnknownFiles() {
     return true;
+  }
+
+  /**
+   * Determine if the listener should process files with the given status.
+   * By default skip {@link FileStatus#IGNORED} and {@link FileStatus#UNKNOWN}.
+   */
+  protected boolean filterOutByStatus(@NotNull FileStatus status) {
+    return status == FileStatus.IGNORED || (filterOutUnknownFiles() && status == FileStatus.UNKNOWN);
   }
 
   @NotNull

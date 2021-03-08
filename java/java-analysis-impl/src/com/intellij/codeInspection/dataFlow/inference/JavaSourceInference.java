@@ -111,7 +111,7 @@ public final class JavaSourceInference {
         method, true, () -> result.getNullability(method, data.methodBody(method)));
       return nullability == null ? Nullability.UNKNOWN : nullability;
     }
-    catch (ClassCastException e) {
+    catch (CannotRestoreExpressionException e) {
       throw ContractInferenceIndexKt.handleInconsistency(method, data, e);
     }
   }
@@ -127,7 +127,7 @@ public final class JavaSourceInference {
         method, true, () -> result.getMutability(method, data.methodBody(method)));
       return mutability == null ? Mutability.UNKNOWN : mutability;
     }
-    catch (ClassCastException e) {
+    catch (CannotRestoreExpressionException e) {
       throw ContractInferenceIndexKt.handleInconsistency(method, data, e);
     }
   }
@@ -135,9 +135,14 @@ public final class JavaSourceInference {
   private static @NotNull MutationSignature findMutationSignature(@NotNull PsiMethodImpl method, @NotNull MethodData data) {
     PurityInferenceResult result = data.getPurity();
     if (result == null) return MutationSignature.unknown();
-    MutationSignature signature =
-      RecursionManager.doPreventingRecursion(method, true, () -> result.getMutationSignature(method, data.methodBody(method)));
-    return signature == null ? MutationSignature.unknown() : signature;
+    try {
+      MutationSignature signature =
+        RecursionManager.doPreventingRecursion(method, true, () -> result.getMutationSignature(method, data.methodBody(method)));
+      return signature == null ? MutationSignature.unknown() : signature;
+    }
+    catch (CannotRestoreExpressionException e) {
+      throw ContractInferenceIndexKt.handleInconsistency(method, data, e);
+    }
   }
 
   @NotNull
@@ -157,7 +162,7 @@ public final class JavaSourceInference {
       contracts = RecursionManager.doPreventingRecursion(
         method, true, () -> ContainerUtil.concat(preContracts, c -> c.toContracts(method, data.methodBody(method))));
     }
-    catch (ClassCastException e) {
+    catch (CannotRestoreExpressionException e) {
       throw ContractInferenceIndexKt.handleInconsistency(method, data, e);
     }
     if (contracts == null || contracts.isEmpty()) return Collections.emptyList();

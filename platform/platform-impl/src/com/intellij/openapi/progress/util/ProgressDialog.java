@@ -267,15 +267,25 @@ final class ProgressDialog implements Disposable {
     }
     myPopup.pack();
 
-    SwingUtilities.invokeLater(() -> {
-      if (myPopup != null && !myPopup.isDisposed()) {
-        myProgressWindow.getFocusManager().requestFocusInProject(myCancelButton, myProgressWindow.myProject).doWhenDone(myRepaintRunnable);
-      }
-    });
-
     Disposer.register(myPopup.getDisposable(), () -> myProgressWindow.exitModality());
 
     myPopup.show();
+
+    // 'Light' popup is shown in glass pane, glass pane is 'activating' (becomes visible) in 'invokeLater' call
+    // (see IdeGlassPaneImp.addImpl), requesting focus to cancel button until that time has no effect, as it's not showing.
+    SwingUtilities.invokeLater(() -> {
+      if (myPopup != null && !myPopup.isDisposed()) {
+        Window window = SwingUtilities.getWindowAncestor(myCancelButton);
+        if (window != null) {
+          Component originalFocusOwner = window.getMostRecentFocusOwner();
+          if (originalFocusOwner != null) {
+            Disposer.register(myPopup.getDisposable(), () -> originalFocusOwner.requestFocusInWindow());
+          }
+        }
+        myCancelButton.requestFocusInWindow();
+        myRepaintRunnable.run();
+      }
+    });
   }
 
   private boolean isWriteActionProgress() {
@@ -300,7 +310,7 @@ final class ProgressDialog implements Disposable {
     @Override
     public void doCancelAction() {
       if (myIsCancellable) {
-        super.doCancelAction();
+        ProgressDialog.this.doCancelAction();
       }
     }
 
@@ -318,12 +328,6 @@ final class ProgressDialog implements Disposable {
       else {
         return super.createPeer(parent, canBeParent);
       }
-    }
-
-    @NotNull
-    @Override
-    protected DialogWrapperPeer createPeer(final boolean canBeParent, final boolean applicationModalIfPossible) {
-      return createPeer(null, canBeParent, applicationModalIfPossible);
     }
 
     @NotNull

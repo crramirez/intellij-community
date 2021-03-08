@@ -21,7 +21,6 @@
     <extensionPoint qualifiedName="com.intellij.javaModuleSystem" interface="com.intellij.psi.JavaModuleSystem" dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.javaCompilerConfigurationProxy" interface="com.intellij.psi.JavaCompilerConfigurationProxy" dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.custom.exception.handler" interface="com.intellij.codeInsight.CustomExceptionHandler" dynamic="true"/>
-    <extensionPoint qualifiedName="com.intellij.lang.psiTypeAnnotationModifier" interface="com.intellij.psi.augment.TypeAnnotationModifier" dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.lang.inferredAnnotationProvider" interface="com.intellij.codeInsight.InferredAnnotationProvider" area="IDEA_PROJECT" dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.lang.psiAugmentProvider" interface="com.intellij.psi.augment.PsiAugmentProvider" dynamic="true"/>
     <extensionPoint qualifiedName="com.intellij.psi.clsCustomNavigationPolicy" interface="com.intellij.psi.impl.compiled.ClsCustomNavigationPolicy" dynamic="true"/>
@@ -69,8 +68,6 @@
     <applicationService serviceInterface="com.intellij.psi.PsiSubstitutorFactory"
                         serviceImplementation="com.intellij.psi.impl.PsiSubstitutorFactoryImpl"/>
 
-    <projectService serviceImplementation="com.intellij.codeInsight.ConcurrencyAnnotationsManager"/>
-    <projectService serviceImplementation="com.intellij.psi.controlFlow.ControlFlowFactory"/>
     <projectService serviceInterface="com.intellij.psi.SmartTypePointerManager"
                     serviceImplementation="com.intellij.psi.impl.smartPointers.SmartTypePointerManagerImpl"/>
     <projectService serviceInterface="com.intellij.psi.PsiResolveHelper"
@@ -137,7 +134,7 @@
     <analysis.uastAnalysisPlugin implementation="org.jetbrains.uast.java.analysis.JavaUastAnalysisPlugin"/>
     <generate.uastCodeGenerationPlugin implementation="org.jetbrains.uast.java.generate.JavaUastCodeGenerationPlugin"/>
   </extensions>
-  
+
   <extensions defaultExtensionNs="com.intellij">
     <registryKey defaultValue="30" description="UAST usages graph building depth limit" key="uast.usage.graph.default.recursion.depth.limit"/>
   </extensions>

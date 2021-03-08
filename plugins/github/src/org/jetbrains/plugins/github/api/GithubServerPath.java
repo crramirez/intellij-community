@@ -1,8 +1,9 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.plugins.github.api;
 
 import com.intellij.openapi.util.NlsSafe;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.util.hosting.GitHostingUrlUtil;
 import com.intellij.util.io.URLUtil;
 import com.intellij.util.xmlb.annotations.Attribute;
 import com.intellij.util.xmlb.annotations.Tag;
@@ -10,7 +11,6 @@ import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.github.exceptions.GithubParseException;
-import org.jetbrains.plugins.github.util.GithubUrlUtil;
 
 import java.net.URI;
 import java.util.Objects;
@@ -77,7 +77,7 @@ public class GithubServerPath {
   }
 
   public boolean matches(@NotNull String gitRemoteUrl) {
-    URI uri = GithubUrlUtil.getUriFromRemoteUrl(gitRemoteUrl);
+    URI uri = GitHostingUrlUtil.getUriFromRemoteUrl(gitRemoteUrl);
     if (uri == null) return false;
 
     String host = uri.getHost();
@@ -131,6 +131,14 @@ public class GithubServerPath {
   @NotNull
   public String toUrl() {
     return getSchemaUrlPart() + myHost + getPortUrlPart() + StringUtil.notNullize(mySuffix);
+  }
+
+  @NotNull
+  public String toUrl(boolean showSchema) {
+    StringBuilder builder = new StringBuilder();
+    if (showSchema) builder.append(getSchemaUrlPart());
+    builder.append(myHost).append(getPortUrlPart()).append(StringUtil.notNullize(mySuffix));
+    return builder.toString();
   }
 
   @NotNull

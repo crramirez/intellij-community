@@ -8,15 +8,13 @@ import com.intellij.openapi.keymap.KeymapUtil;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.ui.popup.JBPopup;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
-import com.intellij.openapi.ui.popup.JBPopupListener;
-import com.intellij.openapi.ui.popup.LightweightWindowEvent;
 import com.intellij.openapi.util.Condition;
-import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.ui.components.JBList;
 import com.intellij.ui.components.JBTextField;
 import com.intellij.ui.scale.JBUIScale;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -176,24 +174,6 @@ public class SearchTextField extends JPanel {
   }
 
   protected void onFocusGained() {
-  }
-
-  /**
-   * @deprecated unused
-   */
-  @Deprecated
-  @SuppressWarnings("unused")
-  protected boolean isSearchControlUISupported() {
-    return true;
-  }
-
-  /**
-   * @deprecated unused
-   */
-  @Deprecated
-  @SuppressWarnings("unused")
-  protected boolean hasIconsOutsideOfTextField() {
-    return false;
   }
 
   public void addDocumentListener(DocumentListener listener) {
@@ -440,6 +420,7 @@ public class SearchTextField extends JPanel {
    * @deprecated unused
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   @SuppressWarnings("unused")
   public void setSearchIcon(final Icon icon) {
   }

@@ -17,6 +17,10 @@ abstract class PrimitiveEventField<T> : EventField<T>() {
   abstract val validationRule: List<String>
 }
 
+abstract class ListEventField<T> : EventField<List<T>>() {
+  abstract val validationRule: List<String>
+}
+
 data class EventPair<T>(val field: EventField<T>, val data: T) {
   fun addData(featureUsageData: FeatureUsageData) = field.addData(featureUsageData, data)
 }
@@ -69,6 +73,15 @@ data class LongEventField(override val name: String): PrimitiveEventField<Long>(
   }
 }
 
+data class FloatEventField(override val name: String): PrimitiveEventField<Float>() {
+  override val validationRule: List<String>
+    get() =  listOf("{regexp#float}")
+
+  override fun addData(fuData: FeatureUsageData, value: Float) {
+    fuData.addData(name, value)
+  }
+}
+
 data class DoubleEventField(override val name: String): PrimitiveEventField<Double>() {
   override val validationRule: List<String>
     get() =  listOf("{regexp#float}")
@@ -87,6 +100,15 @@ data class BooleanEventField(override val name: String): PrimitiveEventField<Boo
   }
 }
 
+data class AnonymizedEventField(override val name: String): PrimitiveEventField<String?>() {
+  override val validationRule: List<String>
+    get() = listOf("{regexp#hash}")
+
+  override fun addData(fuData: FeatureUsageData, value: String?) {
+    fuData.addAnonymizedValue(name, value)
+  }
+}
+
 data class EnumEventField<T : Enum<*>>(override val name: String,
                                        private val enumClass: Class<T>,
                                        private val transform: (T) -> String): PrimitiveEventField<T>() {
@@ -98,7 +120,7 @@ data class EnumEventField<T : Enum<*>>(override val name: String,
     get() = listOf("{enum:${enumClass.enumConstants.map(transform).joinToString("|")}}")
 }
 
-data class LongListEventField(override val name: String): PrimitiveEventField<List<Long>>() {
+data class LongListEventField(override val name: String): ListEventField<Long>() {
   override val validationRule: List<String>
     get() =  listOf("{regexp#integer}")
 
@@ -107,7 +129,7 @@ data class LongListEventField(override val name: String): PrimitiveEventField<Li
   }
 }
 
-abstract class StringListEventField(override val name: String) : PrimitiveEventField<List<String>>() {
+abstract class StringListEventField(override val name: String) : ListEventField<String>() {
 
   override fun addData(fuData: FeatureUsageData, value: List<String>) {
     fuData.addData(name, value)
@@ -116,7 +138,7 @@ abstract class StringListEventField(override val name: String) : PrimitiveEventF
   data class ValidatedByAllowedValues(@NonNls override val name: String,
                                       val allowedValues: List<String>) : StringListEventField(name) {
     override val validationRule: List<String>
-      get() = allowedValues
+      get() = listOf("{enum:${allowedValues.joinToString("|")}}")
   }
 
   data class ValidatedByEnum(@NonNls override val name: String, @NonNls val enumRef: String) : StringListEventField(name) {

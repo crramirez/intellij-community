@@ -4,7 +4,9 @@ package com.jetbrains.python;
 import com.intellij.codeInsight.hint.HintManager;
 import com.intellij.codeInspection.InspectionProfileEntry;
 import com.intellij.codeInspection.LocalQuickFix;
+import com.intellij.codeInspection.ui.InspectionOptionsPanel;
 import com.intellij.codeInspection.ui.ListEditForm;
+import com.intellij.codeInspection.ui.MultipleCheckboxOptionsPanel;
 import com.intellij.codeInspection.ui.SingleCheckboxOptionsPanel;
 import com.intellij.ide.DataManager;
 import com.intellij.ide.util.EditSourceUtil;
@@ -112,7 +114,7 @@ public final class PythonUiServiceImpl extends PythonUiService {
     final ElementsChooser<String> chooser = new ElementsChooser<>(true);
     chooser.setElements(supportedInSettings, false);
     chooser.markElements(ContainerUtil.filter(ourVersions, supportedInSettings::contains));
-    chooser.addElementsMarkListener(new ElementsChooser.ElementsMarkListener<String>() {
+    chooser.addElementsMarkListener(new ElementsChooser.ElementsMarkListener<>() {
       @Override
       public void elementMarkChanged(String element, boolean isMarked) {
         ourVersions.clear();
@@ -234,12 +236,12 @@ public final class PythonUiServiceImpl extends PythonUiService {
 
   @Override
   public <E> JComboBox<E> createComboBox(E[] items) {
-    return new ComboBox<E>(items);
+    return new ComboBox<>(items);
   }
 
   @Override
   public <E> JComboBox<E> createComboBox(E[] items, int width) {
-    return new ComboBox<E>(items, width);
+    return new ComboBox<>(items, width);
   }
 
   @Override
@@ -477,5 +479,24 @@ public final class PythonUiServiceImpl extends PythonUiService {
                               @ListItem String initialValue,
                               @Nullable Icon icon) {
     return MessagesService.getInstance().showChooseDialog(project, parentComponent, message, title, values, initialValue, icon);
+  }
+
+  @Override
+  public JPanel createMultipleCheckboxOptionsPanel(final InspectionProfileEntry owner) {
+    return new MultipleCheckboxOptionsPanel(owner);
+  }
+
+  @Override
+  public void addRowToOptionsPanel(JPanel optionsPanel, JComponent label, JComponent component) {
+    if (optionsPanel instanceof InspectionOptionsPanel) {
+      ((InspectionOptionsPanel) optionsPanel).addRow(label, component);
+    }
+  }
+
+  @Override
+  public void addCheckboxToOptionsPanel(JPanel optionsPanel, String label, String property) {
+    if (optionsPanel instanceof MultipleCheckboxOptionsPanel) {
+      ((MultipleCheckboxOptionsPanel) optionsPanel).addCheckbox(label, property);
+    }
   }
 }

@@ -25,6 +25,7 @@ data class OpenProjectTask(val forceOpenInNewFrame: Boolean = false,
                             */
                            val showWelcomeScreen: Boolean = true,
                            @set:Deprecated(message = "Pass to constructor", level = DeprecationLevel.ERROR)
+                           @set:ApiStatus.ScheduledForRemoval(inVersion = "2021.2")
                            var callback: ProjectOpenedCallback? = null,
                            internal val frameManager: Any? = null,
                            val line: Int = -1,
@@ -74,6 +75,13 @@ data class OpenProjectTask(val forceOpenInNewFrame: Boolean = false,
                              runConfigurators = true,
                              isProjectCreatedWithWizard = true,
                              isRefreshVfsNeeded = isRefreshVfsNeeded)
+    }
+
+    @JvmStatic
+    fun fromWizardAndRunConfigurators(): OpenProjectTask {
+      return OpenProjectTask(runConfigurators = true,
+                             isProjectCreatedWithWizard = true,
+                             isRefreshVfsNeeded = false)
     }
 
     @JvmStatic

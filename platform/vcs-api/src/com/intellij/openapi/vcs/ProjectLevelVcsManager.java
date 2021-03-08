@@ -13,10 +13,7 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.Processor;
 import com.intellij.util.concurrency.annotations.RequiresEdt;
 import com.intellij.util.messages.Topic;
-import org.jetbrains.annotations.Nls;
-import org.jetbrains.annotations.NonNls;
-import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.*;
 
 import java.util.List;
 
@@ -126,6 +123,7 @@ public abstract class ProjectLevelVcsManager {
    * @deprecated use {@link #addMessageToConsoleWindow(String, ConsoleViewContentType)}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public abstract void addMessageToConsoleWindow(@Nls String message, TextAttributes attributes);
 
   public abstract void addMessageToConsoleWindow(@Nls @Nullable String message, @NotNull ConsoleViewContentType contentType);
@@ -147,22 +145,6 @@ public abstract class ProjectLevelVcsManager {
 
   @RequiresEdt
   public abstract void showProjectOperationInfo(final UpdatedFiles updatedFiles, @Nls String displayActionName);
-
-  /**
-   * Adds a listener for receiving notifications about changes in VCS configuration for the project.
-   *
-   * @deprecated use {@link #VCS_CONFIGURATION_CHANGED} instead
-   */
-  @Deprecated
-  public abstract void addVcsListener(VcsListener listener);
-
-  /**
-   * Removes a listener for receiving notifications about changes in VCS configuration for the project.
-   *
-   * @deprecated use {@link #VCS_CONFIGURATION_CHANGED} instead
-   */
-  @Deprecated
-  public abstract void removeVcsListener(VcsListener listener);
 
   /**
    * Marks the beginning of a background VCS operation (commit or update).
@@ -199,6 +181,7 @@ public abstract class ProjectLevelVcsManager {
    * @deprecated Use just {@link #setDirectoryMappings(List)}.
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public void updateActiveVcss() {}
 
   public abstract List<VcsDirectoryMapping> getDirectoryMappings();
@@ -210,6 +193,7 @@ public abstract class ProjectLevelVcsManager {
    * This method can be used only when initially loading the project configuration!
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public abstract void setDirectoryMapping(@NonNls String path, @NonNls String activeVcsName);
 
   public abstract void setDirectoryMappings(final List<VcsDirectoryMapping> items);

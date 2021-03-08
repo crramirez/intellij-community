@@ -9,7 +9,6 @@ import com.intellij.ui.render.RenderingUtil;
 import com.intellij.ui.treeStructure.Tree;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.tree.TreeUtil;
-import com.intellij.util.ui.tree.WideSelectionTreeUI;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -53,8 +52,7 @@ public class DnDAwareTree extends Tree implements DnDAware {
 
   @Override
   public final boolean isOverSelection(final Point point) {
-    final TreePath path = WideSelectionTreeUI.isWideSelection(this)
-                          ? getClosestPathForLocation(point.x, point.y) : getPathForLocation(point.x, point.y);
+    final TreePath path = TreeUtil.getPathForLocation(this, point.x, point.y);
     if (path == null) return false;
     return isPathSelected(path);
   }
@@ -128,7 +126,7 @@ public class DnDAwareTree extends Tree implements DnDAware {
         JTree tree = (JTree)component;
         TreePath[] selection = tree.getSelectionPaths();
         if (selection != null && selection.length > 1) {
-          return new TransferableList<TreePath>(selection) {
+          return new TransferableList<>(selection) {
             @Override
             protected String toString(TreePath path) {
               return String.valueOf(path.getLastPathComponent());

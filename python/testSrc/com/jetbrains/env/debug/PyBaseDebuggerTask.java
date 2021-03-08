@@ -148,7 +148,7 @@ public abstract class PyBaseDebuggerTask extends PyExecutionFixtureTestTask {
     myDebugProcess.startSetNextStatement(
       currentSession.getSuspendContext(),
       XDebuggerUtil.getInstance().createPosition(position.getFile(), line),
-      new PyDebugCallback<Pair<Boolean, String>>() {
+      new PyDebugCallback<>() {
         @Override
         public void ok(Pair<Boolean, String> value) {
           callback.evaluated(value);
@@ -179,7 +179,7 @@ public abstract class PyBaseDebuggerTask extends PyExecutionFixtureTestTask {
   }
 
   protected List<PyDebugValue> loadFrame() throws PyDebuggerException {
-    return convertToList(myDebugProcess.loadFrame());
+    return convertToList(myDebugProcess.loadFrame(null));
   }
 
   protected PyStackFrame getCurrentStackFrame() {
@@ -191,7 +191,7 @@ public abstract class PyBaseDebuggerTask extends PyExecutionFixtureTestTask {
     assert debugValue != null;
     Semaphore variableSemaphore = new Semaphore(0);
     final ArrayList<PyFrameAccessor.PyAsyncValue<String>> valuesForEvaluation = createAsyncValue(debugValue, variableSemaphore);
-    myDebugProcess.loadAsyncVariablesValues(valuesForEvaluation);
+    myDebugProcess.loadAsyncVariablesValues(null, valuesForEvaluation);
     if (!variableSemaphore.tryAcquire(NORMAL_TIMEOUT, TimeUnit.MILLISECONDS)) {
       throw new PyDebuggerException("Timeout exceeded, failed to load variable: " + debugValue.getName());
     }
@@ -200,7 +200,7 @@ public abstract class PyBaseDebuggerTask extends PyExecutionFixtureTestTask {
 
   public static ArrayList<PyFrameAccessor.PyAsyncValue<String>> createAsyncValue(PyDebugValue debugValue, Semaphore semaphore) {
     ArrayList<PyFrameAccessor.PyAsyncValue<String>> valuesForEvaluation = new ArrayList<>();
-    valuesForEvaluation.add(new PyFrameAccessor.PyAsyncValue<>(debugValue, new PyDebugCallback<String>() {
+    valuesForEvaluation.add(new PyFrameAccessor.PyAsyncValue<>(debugValue, new PyDebugCallback<>() {
       @Override
       public void ok(String value) {
         debugValue.setValue(value);
@@ -388,7 +388,7 @@ public abstract class PyBaseDebuggerTask extends PyExecutionFixtureTestTask {
     final PyReferringObjectsValue value = new PyReferringObjectsValue((PyDebugValue)var);
     EvaluationCallback<List<String>> callback = new EvaluationCallback<>();
 
-    myDebugProcess.loadReferrers(value, new PyDebugCallback<XValueChildrenList>() {
+    myDebugProcess.loadReferrers(value, new PyDebugCallback<>() {
       @Override
       public void ok(XValueChildrenList valueList) {
         ArrayList<String> values = new ArrayList<>();
@@ -420,7 +420,7 @@ public abstract class PyBaseDebuggerTask extends PyExecutionFixtureTestTask {
    * @see #consoleExecAndWait(String)
    */
   protected void consoleExec(String command) {
-    myDebugProcess.consoleExec(command, new PyDebugCallback<String>() {
+    myDebugProcess.consoleExec(command, new PyDebugCallback<>() {
       @Override
       public void ok(String value) {
       }
@@ -440,7 +440,7 @@ public abstract class PyBaseDebuggerTask extends PyExecutionFixtureTestTask {
    */
   protected void consoleExecAndWait(String command) {
     EvaluationCallback<String> callback = new EvaluationCallback<>();
-    myDebugProcess.consoleExec(command, new PyDebugCallback<String>() {
+    myDebugProcess.consoleExec(command, new PyDebugCallback<>() {
       @Override
       public void ok(String value) {
         callback.evaluated(value);

@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.intellij.build
 
 import com.intellij.openapi.util.io.FileUtil
@@ -67,7 +67,6 @@ final class CommunityRepositoryModules {
     "intellij.platform.elevation.client",
     "intellij.platform.elevation.common",
     "intellij.platform.elevation.daemon",
-    "intellij.platform.elevation.rpc",
     "intellij.platform.execution.impl",
     "intellij.platform.inspect",
     "intellij.platform.lang.impl",
@@ -93,7 +92,8 @@ final class CommunityRepositoryModules {
     "intellij.platform.diagnostic",
     "intellij.platform.core.ui",
     "intellij.platform.credentialStore",
-    "intellij.platform.rd.community"
+    "intellij.platform.rd.community",
+    "intellij.platform.ml.impl"
   ]
 
   /**
@@ -127,6 +127,9 @@ final class CommunityRepositoryModules {
     plugin("intellij.properties.resource.bundle.editor"),
     plugin("intellij.vcs.git") {
       withModule("intellij.vcs.git.rt", "git4idea-rt.jar", null)
+    },
+    plugin("intellij.vcs.svn"){
+      withProjectLibrary("sqlite")
     },
     plugin("intellij.xpath") {
       withModule("intellij.xpath.rt", "rt/xslt-rt.jar")
@@ -187,13 +190,15 @@ final class CommunityRepositoryModules {
       withModule("intellij.gradle.common")
       withModule("intellij.gradle.toolingExtension")
       withModule("intellij.gradle.toolingExtension.impl")
+      withModule("intellij.gradle.toolingProxy")
       withProjectLibrary("Gradle")
     },
     plugin("intellij.externalSystem.dependencyUpdater"),
     plugin("intellij.gradle.dependencyUpdater"),
-    plugin("intellij.gradle.dsl") {
-      withModule("intellij.gradle.dsl.impl")
-      withModule("intellij.gradle.dsl.kotlin.impl")
+    plugin("intellij.android.gradle.dsl") {
+      withModule("intellij.android.gradle.dsl")
+      withModule("intellij.android.gradle.dsl.kotlin.impl")
+      withModule("intellij.android.gradle.dsl.impl")
     },
     plugin("intellij.gradle.java") {
       withModule("intellij.gradle.jps")
@@ -226,7 +231,6 @@ final class CommunityRepositoryModules {
     },
     plugin("intellij.java.coverage") {
       withModule("intellij.java.coverage.rt")
-      withProjectLibrary("JaCoCo") //todo[nik] convert to module library
     },
     plugin("intellij.java.decompiler") {
       directoryName = "java-decompiler"
@@ -259,22 +263,20 @@ final class CommunityRepositoryModules {
     plugin("intellij.statsCollector") {
       bundlingRestrictions.includeInEapOnly = true
     },
+    plugin("intellij.ml.models.local") {
+      bundlingRestrictions.includeInEapOnly = true
+    },
     plugin("intellij.jps.cache"),
     plugin("intellij.space") {
       withProjectLibrary("space-idea-sdk")
       withProjectLibrary("jackson-datatype-joda")
-      withProjectLibrary("ktor-server-jetty")
-      withGeneratedResources(new ResourcesGenerator() {
-        @Override
-        File generateResources(BuildContext context) {
-          def gradleRunner = context.getGradle()
-          gradleRunner.run("Download Space Automation definitions", "setupSpaceAutomationDefinitions")
-          return context.paths.communityHomeDir.resolve("build/dependencies/build/space").toFile()
-        }
-      }, "lib")
     },
     plugin("intellij.lombok") {
       withModule("intellij.lombok.generated")
+    },
+    plugin("intellij.android.jpsBuildPlugin") {
+      withModule("intellij.android.jpsBuildPlugin.common")
+      withModule("intellij.android.jpsBuildPlugin.jps", "jps/android-jps-plugin.jar", null)
     }
   ]
 
@@ -308,7 +310,6 @@ final class CommunityRepositoryModules {
 
       withModule("intellij.android.common", "android-common.jar", null)
       withModule("intellij.android.buildCommon", "build-common.jar", null)
-      withModule("intellij.android.rt", "android-rt.jar", null)
 
       withModule("intellij.android.core", "android.jar", null)
       withModule("intellij.android.adb", "android.jar")
@@ -403,7 +404,6 @@ final class CommunityRepositoryModules {
       withModule("android.sdktools.layoutinspector", "sdk-tools.jar")
       withModule("android.sdktools.usb-devices", "sdk-tools.jar")
 
-      withModule("intellij.android.jps", "jps/android-jps-plugin.jar", null)
       withModule("intellij.android.jps.model")
 
       withProjectLibrary("kxml2") //todo[nik] move to module libraries

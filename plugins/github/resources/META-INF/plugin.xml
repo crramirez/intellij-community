@@ -1,4 +1,4 @@
-<idea-plugin>
+<idea-plugin package="org.jetbrains.plugins.github">
   <name>GitHub</name>
   <id>org.jetbrains.plugins.github</id>
   <vendor>JetBrains</vendor>
@@ -26,7 +26,6 @@
     <httpRequestHandler implementation="org.jetbrains.plugins.github.authentication.GHOAuthCallbackHandler"/>
 
     <applicationService serviceImplementation="org.jetbrains.plugins.github.util.GithubSettings"/>
-    <projectService serviceImplementation="org.jetbrains.plugins.github.pullrequest.config.GithubPullRequestsProjectUISettings"/>
 
     <applicationService serviceImplementation="org.jetbrains.plugins.github.authentication.accounts.GithubAccountManager"/>
     <applicationService serviceImplementation="org.jetbrains.plugins.github.authentication.GithubAuthenticationManager"/>
@@ -46,8 +45,6 @@
                          instance="org.jetbrains.plugins.github.ui.GithubSettingsConfigurable"/>
     <statistics.applicationUsagesCollector
       implementation="org.jetbrains.plugins.github.authentication.accounts.GithubAccountsStatisticsCollector"/>
-    <statistics.projectUsagesCollector
-      implementation="org.jetbrains.plugins.github.pullrequest.GHPRStatisticsCollector$ProjectState"/>
     <statistics.counterUsagesCollector
       implementationClass="org.jetbrains.plugins.github.pullrequest.GHPRStatisticsCollector$Counters"/>
     <statistics.notificationIdsHolder implementation="org.jetbrains.plugins.github.util.GithubNotificationIdsHolder"/>
@@ -62,14 +59,14 @@
     <fileIconProvider implementation="org.jetbrains.plugins.github.pullrequest.GHPRVirtualFileIconProvider" order="first"/>
     <fileEditorProvider implementation="org.jetbrains.plugins.github.pullrequest.GHPREditorProvider"/>
 
-    <toolWindow id="Pull Requests" icon="GithubIcons.PullRequestsToolWindow"
-                anchor="left" canCloseContents="true" doNotActivateOnStart="true"
+    <toolWindow id="Pull Requests" icon="org.jetbrains.plugins.github.GithubIcons.PullRequestsToolWindow"
+                anchor="left" doNotActivateOnStart="true"
                 factoryClass="org.jetbrains.plugins.github.pullrequest.GHPRToolWindowFactory"/>
 
     <diff.actions.ShowDiffAction.ExtensionProvider
       implementation="org.jetbrains.plugins.github.pullrequest.action.GHPRShowDiffActionProvider"/>
 
-    <iconProvider implementation="org.jetbrains.plugins.github.extensions.GithubYamlIconProvider"/>
+    <fileIconProvider implementation="org.jetbrains.plugins.github.extensions.GithubYamlIconProvider"/>
   </extensions>
 
   <applicationListeners>
@@ -85,10 +82,6 @@
               topic="org.jetbrains.plugins.github.authentication.accounts.AccountRemovedListener"/>
     <listener class="org.jetbrains.plugins.github.util.GHProjectRepositoriesManager$AccountsListener"
               topic="org.jetbrains.plugins.github.authentication.accounts.AccountTokenChangedListener"/>
-
-    <listener class="org.jetbrains.plugins.github.pullrequest.GHPRToolWindowController$BeforeProjectCloseListener"
-              topic="com.intellij.openapi.project.ProjectManagerListener"
-              activeInHeadlessMode="false" activeInTestMode="false"/>
   </applicationListeners>
 
   <projectListeners>
@@ -103,10 +96,6 @@
               topic="com.intellij.dvcs.repo.VcsRepositoryMappingListener"/>
     <listener class="org.jetbrains.plugins.github.util.GHProjectRepositoriesManager$RemoteUrlsListener"
               topic="git4idea.repo.GitRepositoryChangeListener"/>
-
-    <listener class="org.jetbrains.plugins.github.pullrequest.GHPRToolWindowController$BeforePluginUnloadListener"
-              topic="com.intellij.ide.plugins.DynamicPluginListener"
-              activeInHeadlessMode="false" activeInTestMode="false"/>
   </projectListeners>
 
   <extensions defaultExtensionNs="Git4Idea">
@@ -121,10 +110,10 @@
     <action id="Github.Share" class="org.jetbrains.plugins.github.GithubShareAction">
       <add-to-group group-id="Vcs.Import"/>
     </action>
-    <action id="Github.Rebase" class="org.jetbrains.plugins.github.GithubRebaseAction">
+    <action id="Github.Sync.Fork" class="org.jetbrains.plugins.github.GithubSyncForkAction">
       <add-to-group group-id="Git.Menu"/>
     </action>
-    <action id="Github.Create.Pull.Request" class="org.jetbrains.plugins.github.GithubCreatePullRequestAction">
+    <action id="Github.Create.Pull.Request" class="org.jetbrains.plugins.github.pullrequest.action.GHPRCreatePullRequestAction">
       <add-to-group group-id="Git.Menu"/>
     </action>
     <action id="Github.View.Pull.Request" class="org.jetbrains.plugins.github.GithubViewPullRequestsAction">
@@ -151,7 +140,7 @@
       <reference ref="Github.Share"/>
       <reference ref="Github.Create.Pull.Request"/>
       <reference ref="Github.View.Pull.Request"/>
-      <reference ref="Github.Rebase"/>
+      <reference ref="Github.Sync.Fork"/>
       <reference ref="Github.Create.Gist"/>
       <reference ref="Github.Open.In.Browser"/>
 

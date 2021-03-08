@@ -13,6 +13,8 @@ import com.intellij.workspaceModel.storage.WorkspaceEntityStorageBuilder
 interface WorkspaceModel {
   val entityStorage: VersionedEntityStorage
 
+  val cache: WorkspaceModelCache?
+
   /**
    * Modifies the current model by calling [updater] and applying it to the storage. Requires write action.
    */
@@ -67,7 +69,7 @@ interface WorkspaceModel {
   companion object {
     @JvmStatic
     val isEnabled: Boolean
-      get() = Registry.`is`("ide.new.project.model")
+      get() = !Registry.`is`("ide.old.project.model")
 
     @JvmStatic
     fun getInstance(project: Project): WorkspaceModel = project.service()

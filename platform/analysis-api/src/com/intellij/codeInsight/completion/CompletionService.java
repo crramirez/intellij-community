@@ -15,10 +15,8 @@ import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -43,6 +41,7 @@ public abstract class CompletionService {
    * @deprecated use {@link CompletionResultSet#addLookupAdvertisement(String)}
    */
   @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
   public abstract void setAdvertisementText(@Nullable @NlsContexts.PopupAdvertisement String text);
 
   /**
@@ -105,7 +104,7 @@ public abstract class CompletionService {
 
     AtomicBoolean typoTolerant = new AtomicBoolean();
 
-    BatchConsumer<CompletionResult> batchConsumer = new BatchConsumer<CompletionResult>() {
+    BatchConsumer<CompletionResult> batchConsumer = new BatchConsumer<>() {
       @Override
       public void startBatch() {
         if (consumer instanceof BatchConsumer) {

@@ -545,4 +545,21 @@ public class VfsUtilTest extends BareTestFixtureTestCase {
     assertTrue(vFile2.getParent().isCaseSensitive());
     assertEquals(FileAttributes.CaseSensitivity.SENSITIVE, ((VirtualDirectoryImpl)vFile2.getParent()).getChildrenCaseSensitivity());
   }
+
+  @Test
+  public void pathEqualsWorksForWslPaths() throws IOException {
+    IoTestUtil.assumeWindows();
+    IoTestUtil.assumeWslPresence();
+    List<@NotNull String> distributions = IoTestUtil.enumerateWslDistributions();
+    assumeTrue("No WSL distributions found", !distributions.isEmpty());
+
+    String wslName = distributions.get(0);
+    VirtualFile usrBin = LocalFileSystem.getInstance().findFileByIoFile(new File("\\\\wsl$\\" + wslName + "\\usr\\bin\\"));
+    assertTrue(VfsUtilCore.pathEqualsTo(usrBin, "\\\\wsl$\\" + wslName + "\\usr\\bin\\"));
+    assertTrue(VfsUtilCore.pathEqualsTo(usrBin, "//wsl$/" + wslName + "/usr/bin"));
+    assertTrue(VfsUtilCore.pathEqualsTo(usrBin, "//wsl$/" + wslName + "/usr/bin/"));
+    assertFalse(VfsUtilCore.pathEqualsTo(usrBin, "//xxx$/" + wslName + "/usr/bin/"));
+    assertFalse(VfsUtilCore.pathEqualsTo(usrBin, "//wsl$/xxx/usr/bin/"));
+    assertFalse(VfsUtilCore.pathEqualsTo(usrBin.getParent(), "//wsl$/xxx/usr"));
+  }
 }

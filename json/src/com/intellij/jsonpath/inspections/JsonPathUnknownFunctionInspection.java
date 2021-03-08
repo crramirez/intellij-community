@@ -2,26 +2,39 @@
 package com.intellij.jsonpath.inspections;
 
 import com.intellij.codeInspection.LocalInspectionTool;
+import com.intellij.codeInspection.ProblemHighlightType;
 import com.intellij.codeInspection.ProblemsHolder;
 import com.intellij.json.JsonBundle;
 import com.intellij.jsonpath.JsonPathConstants;
-import com.intellij.jsonpath.psi.JsonPathFunctionName;
+import com.intellij.jsonpath.psi.JsonPathFunctionCall;
+import com.intellij.jsonpath.psi.JsonPathId;
 import com.intellij.jsonpath.psi.JsonPathVisitor;
 import com.intellij.psi.PsiElementVisitor;
 import org.jetbrains.annotations.NotNull;
+
+import static com.intellij.jsonpath.ui.JsonPathEvaluateManager.JSON_PATH_EVALUATE_EXPRESSION_KEY;
 
 final class JsonPathUnknownFunctionInspection extends LocalInspectionTool {
   @Override
   public @NotNull PsiElementVisitor buildVisitor(@NotNull ProblemsHolder holder, boolean isOnTheFly) {
     return new JsonPathVisitor() {
       @Override
-      public void visitFunctionName(@NotNull JsonPathFunctionName o) {
-        super.visitFunctionName(o);
+      public void visitFunctionCall(@NotNull JsonPathFunctionCall call) {
+        super.visitFunctionCall(call);
 
-        if (!JsonPathConstants.STANDARD_FUNCTIONS.containsKey(o.getText())) {
-          holder.registerProblem(o, null, JsonBundle.message("inspection.message.jsonpath.unknown.function.name", o.getText()));
+        JsonPathId functionId = call.getId();
+        String functionName = functionId.getText();
 
-          // todo Suppress for name quick fix
+        if (!JsonPathConstants.STANDARD_FUNCTIONS.containsKey(functionName)) {
+          boolean isEvaluateExpr = Boolean.TRUE.equals(holder.getFile().getUserData(JSON_PATH_EVALUATE_EXPRESSION_KEY));
+          if (isEvaluateExpr) {
+            holder.registerProblem(functionId, JsonBundle.message("inspection.message.jsonpath.unsupported.jayway.function", functionName),
+                                   ProblemHighlightType.ERROR);
+          }
+          else {
+            holder.registerProblem(functionId, null, JsonBundle.message("inspection.message.jsonpath.unknown.function.name", functionName));
+            // todo Suppress for name quick fix
+          }
         }
       }
     };

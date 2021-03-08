@@ -63,11 +63,12 @@ open class EntityStorageInternalIndex<T> private constructor(
 
     fun toImmutable(): EntityStorageInternalIndex<T> {
       freezed = true
-      return EntityStorageInternalIndex(index, this.oneToOneAssociation)
+      return EntityStorageInternalIndex(this.index, this.oneToOneAssociation)
     }
 
     companion object {
       fun <T> from(other: EntityStorageInternalIndex<T>): MutableEntityStorageInternalIndex<T> {
+        if (other is MutableEntityStorageInternalIndex<T>) other.freezed = true
         return MutableEntityStorageInternalIndex(other.index, other.oneToOneAssociation)
       }
     }

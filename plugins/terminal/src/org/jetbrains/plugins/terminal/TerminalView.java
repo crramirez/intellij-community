@@ -1,4 +1,4 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.plugins.terminal;
 
 import com.google.common.collect.Sets;
@@ -15,6 +15,7 @@ import com.intellij.ide.dnd.TransferableWrapper;
 import com.intellij.ide.ui.UISettings;
 import com.intellij.ide.ui.UISettingsListener;
 import com.intellij.ide.util.PropertiesComponent;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.ActionPlaces;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.DataContext;
@@ -27,7 +28,6 @@ import com.intellij.openapi.ui.SimpleToolWindowPanel;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowManager;
@@ -51,9 +51,7 @@ import com.intellij.util.ArrayUtil;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.text.UniqueNameGenerator;
-import com.jediterm.terminal.ProcessTtyConnector;
 import kotlin.Unit;
-import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -70,7 +68,7 @@ import javax.swing.*;
 import java.awt.event.*;
 import java.util.*;
 
-public final class TerminalView {
+public final class TerminalView implements Disposable {
   private final static Key<JBTerminalWidget> TERMINAL_WIDGET_KEY = new Key<>("TerminalWidget");
   private static final Logger LOG = Logger.getInstance(TerminalView.class);
 
@@ -90,6 +88,10 @@ public final class TerminalView {
     myTerminalRunner = ApplicationManager.getApplication()
       .getService(DefaultTerminalRunnerFactory.class)
       .create(project);
+  }
+
+  @Override
+  public void dispose() {
   }
 
   public static TerminalView getInstance(@NotNull Project project) {
@@ -201,7 +203,7 @@ public final class TerminalView {
     final Content content = createTerminalContent(terminalRunner, toolWindow, terminalWidget, tabState);
     final ContentManager contentManager = toolWindow.getContentManager();
     contentManager.addContent(content);
-    new TerminalTabCloseListener(content, myProject);
+    new TerminalTabCloseListener(content, myProject, this);
     Runnable selectRunnable = () -> {
       contentManager.setSelectedContent(content, requestFocus);
     };
@@ -234,8 +236,8 @@ public final class TerminalView {
     Content content = ContentFactory.SERVICE.getInstance().createContent(panel, tabName, false);
 
     if (terminalWidget == null) {
-      VirtualFile currentWorkingDir = getCurrentWorkingDir(tabState);
-      terminalWidget = terminalRunner.createTerminalWidget(content, currentWorkingDir);
+      String currentWorkingDir = terminalRunner.getCurrentWorkingDir(tabState);
+      terminalWidget = terminalRunner.createTerminalWidget(content, currentWorkingDir, true);
       TerminalArrangementManager.getInstance(myProject).assignCommandHistoryFile(terminalWidget, tabState);
       TerminalWorkingDirectoryManager.setInitialWorkingDirectory(content, currentWorkingDir);
     }
@@ -297,7 +299,7 @@ public final class TerminalView {
 
       @Override
       public void onSessionClosed() {
-        terminalWidget.close();
+        getContainer(terminalWidget).closeAndHide();
       }
 
       @Override
@@ -363,12 +365,12 @@ public final class TerminalView {
   }
 
   public boolean isSplitTerminal(@NotNull JBTerminalWidget widget) {
-    TerminalContainer container = Objects.requireNonNull(myContainerByWidgetMap.get(widget));
+    TerminalContainer container = getContainer(widget);
     return container.isSplitTerminal();
   }
 
   public void gotoNextSplitTerminal(@NotNull JBTerminalWidget widget, boolean forward) {
-    TerminalContainer container = Objects.requireNonNull(myContainerByWidgetMap.get(widget));
+    TerminalContainer container = getContainer(widget);
     JBTerminalWidget next = container.getNextSplitTerminal(forward);
     if (next != null) {
       container.requestFocus(next);
@@ -376,7 +378,7 @@ public final class TerminalView {
   }
 
   public void split(@NotNull JBTerminalWidget widget, boolean vertically) {
-    TerminalContainer container = Objects.requireNonNull(myContainerByWidgetMap.get(widget));
+    TerminalContainer container = getContainer(widget);
     JBTerminalWidget newWidget = myTerminalRunner.createTerminalWidget(container.getContent(), null);
     setupTerminalWidget(myToolWindow, newWidget, null, container.getContent(), false);
     container.split(!vertically, newWidget);
@@ -411,50 +413,8 @@ public final class TerminalView {
     return Objects.requireNonNull(myContainerByWidgetMap.get(terminalWidget));
   }
 
-  @Nullable
-  private static VirtualFile getCurrentWorkingDir(@Nullable TerminalTabState tabState) {
-    String dir = tabState != null ? tabState.myWorkingDirectory : null;
-    VirtualFile result = null;
-    if (dir != null) {
-      result = LocalFileSystem.getInstance().findFileByPath(dir);
-    }
-    return result;
-  }
-
-  /**
-   * @deprecated use {@link #closeTab(Content, JBTerminalWidget)} instead
-   * @param content
-   */
-  @ApiStatus.ScheduledForRemoval(inVersion = "2021.3")
-  @Deprecated
   public void closeTab(@NotNull Content content) {
-    closeTab(content, null);
-  }
-
-  public void closeTab(@NotNull Content content, @Nullable JBTerminalWidget terminalWidget) {
-    if (TerminalOptionsProvider.getInstance().closeSessionOnLogout()) {
-      myToolWindow.getContentManager().removeContent(content, true, true, true);
-    }
-    else if (terminalWidget != null) {
-      String text = getSessionCompletedMessage(terminalWidget);
-      terminalWidget.writePlainMessage("\n" + text + "\n");
-      terminalWidget.getTerminalPanel().setCursorVisible(false);
-    }
-  }
-
-  private static @NotNull @Nls String getSessionCompletedMessage(@NotNull JBTerminalWidget widget) {
-    String text = "[" + TerminalBundle.message("session.terminated.text") + "]";
-    ProcessTtyConnector connector = ShellTerminalWidget.getProcessTtyConnector(widget.getTtyConnector());
-    if (connector != null) {
-      Integer exitCode = null;
-      try {
-        exitCode = connector.getProcess().exitValue();
-      }
-      catch (IllegalThreadStateException ignored) {
-      }
-      return text + "\n[" + IdeBundle.message("finished.with.exit.code.text.message", exitCode != null ? exitCode : "unknown") + "]";
-    }
-    return text;
+    myToolWindow.getContentManager().removeContent(content, true, true, true);
   }
 
   @NotNull
@@ -505,11 +465,6 @@ public final class TerminalView {
       contentManager.removeContent(content, true);
       return Unit.INSTANCE;
     });
-    Collection<TerminalContainer> containers = ContainerUtil.filter(myContainerByWidgetMap.values(),
-                                                                    (container -> container.getContent().equals(content)));
-    for (TerminalContainer container : containers) {
-      container.detachWidget();
-    }
     content.putUserData(TERMINAL_WIDGET_KEY, null);
   }
 

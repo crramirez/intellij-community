@@ -51,6 +51,12 @@ final class WslDistributionDescriptor {
     this(msId, msId, null, msId);
   }
 
+  WslDistributionDescriptor(@NotNull String msId,
+                            @Nullable String executablePath,
+                            @NotNull String presentableName) {
+    this(msId, msId, executablePath, presentableName);
+  }
+
   WslDistributionDescriptor(@NotNull String id,
                             @NotNull String msId,
                             @Nullable String executablePath,
@@ -157,8 +163,7 @@ final class WslDistributionDescriptor {
   }
 
   private @Nullable List<String> readWSLOutput(WSLCommandLineOptions options, List<String> command) {
-    WSLDistribution distribution = WSLUtil.getDistributionById(getId());
-    if (distribution == null) return null;
+    WSLDistribution distribution = WslDistributionManager.getInstance().getOrCreateDistributionByMsId(getId());
 
     ProcessOutput output;
     try {
@@ -185,6 +190,9 @@ final class WslDistributionDescriptor {
   }
 
   @Nullable String getEnvironmentVariable(String name) {
-    return readWslOutputLine(new WSLCommandLineOptions(), List.of("printenv", name));
+    return readWslOutputLine(new WSLCommandLineOptions()
+                               .setExecuteCommandInInteractiveShell(true)
+                               .setExecuteCommandInLoginShell(true),
+                             List.of("printenv", name));
   }
 }

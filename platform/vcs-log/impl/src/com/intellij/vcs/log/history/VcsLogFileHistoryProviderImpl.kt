@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.vcs.log.history
 
 import com.google.common.util.concurrent.SettableFuture
@@ -18,6 +18,7 @@ import com.intellij.vcs.log.ui.VcsLogUiEx
 import com.intellij.vcs.log.ui.table.GraphTableModel
 import com.intellij.vcs.log.util.VcsLogUtil
 import com.intellij.vcs.log.util.VcsLogUtil.jumpToRow
+import com.intellij.vcs.log.visible.VisiblePack
 import com.intellij.vcs.log.visible.filters.VcsLogFilterObject
 import com.intellij.vcs.log.visible.filters.matches
 import com.intellij.vcsUtil.VcsUtil
@@ -49,7 +50,7 @@ class VcsLogFileHistoryProviderImpl : VcsLogFileHistoryProvider {
     val hash = revisionNumber?.let { HashImpl.build(it) }
     val root = VcsLogUtil.getActualRoot(project, paths.first())!!
 
-    triggerFileHistoryUsage(paths, hash)
+    triggerFileHistoryUsage(project, paths, hash)
 
     val logManager = VcsProjectLog.getInstance(project).logManager!!
 
@@ -84,11 +85,11 @@ class VcsLogFileHistoryProviderImpl : VcsLogFileHistoryProvider {
     return VcsLogProperties.SUPPORTS_LOG_DIRECTORY_HISTORY.getOrDefault(logProvider)
   }
 
-  private fun triggerFileHistoryUsage(paths: Collection<FilePath>, hash: Hash?) {
-    VcsLogUsageTriggerCollector.triggerUsage(VcsLogUsageTriggerCollector.VcsLogEvent.HISTORY_SHOWN) { data ->
+  private fun triggerFileHistoryUsage(project: Project, paths: Collection<FilePath>, hash: Hash?) {
+    VcsLogUsageTriggerCollector.triggerUsage(VcsLogUsageTriggerCollector.VcsLogEvent.HISTORY_SHOWN, { data ->
       val kind = if (paths.size > 1) "multiple" else if (paths.first().isDirectory) "folder" else "file"
       data.addData("kind", kind).addData("has_revision", hash != null)
-    }
+    }, project)
   }
 
   private fun findOrOpenHistory(project: Project, logManager: VcsLogManager,
@@ -175,15 +176,14 @@ class VcsLogFileHistoryProviderImpl : VcsLogFileHistoryProvider {
 }
 
 private fun VcsLogUiEx.jumpToNearestCommit(storage: VcsLogStorage, hash: Hash, root: VirtualFile, silently: Boolean) {
-  jumpTo(hash, { model: GraphTableModel, h: Hash? ->
+  jumpTo(hash, { visiblePack: VisiblePack, h: Hash? ->
     if (!storage.containsCommit(CommitId(h!!, root))) return@jumpTo GraphTableModel.COMMIT_NOT_FOUND
 
     val commitIndex: Int = storage.getCommitIndex(h, root)
-    val visiblePack = model.visiblePack
     var rowIndex = visiblePack.visibleGraph.getVisibleRowIndex(commitIndex)
     if (rowIndex == null) {
       rowIndex = findVisibleAncestorRow(commitIndex, visiblePack)
     }
     rowIndex ?: GraphTableModel.COMMIT_DOES_NOT_MATCH
-  }, SettableFuture.create(), silently)
+  }, SettableFuture.create(), silently, true)
 }

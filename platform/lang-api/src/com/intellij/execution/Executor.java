@@ -124,16 +124,18 @@ public abstract class Executor {
   }
 
   /**
+   * @return whether the executor can be run on targets or not.
+   */
+  @ApiStatus.Experimental
+  public boolean isSupportedOnTarget() {
+    return false;
+  }
+
+  /**
    * Too long names don't fit into UI controls and have to be trimmed
    */
   @Contract(pure = true)
   public static String shortenNameIfNeeded(@NotNull String name) {
     return StringUtil.trimMiddle(name, Registry.intValue("run.configuration.max.name.length", 80));
-  }
-
-  /** @deprecated use {@link #shortenNameIfNeeded(String)} instead */
-  @Deprecated
-  public static String shortenNameIfNeed(@NotNull String name) {
-    return shortenNameIfNeeded(name);
   }
 }

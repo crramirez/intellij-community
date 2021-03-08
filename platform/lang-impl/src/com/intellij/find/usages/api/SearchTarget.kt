@@ -1,8 +1,9 @@
-// Copyright 2000-2020 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2021 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.find.usages.api
 
 import com.intellij.model.Pointer
-import com.intellij.navigation.TargetPopupPresentation
+import com.intellij.model.search.SearchRequest
+import com.intellij.navigation.TargetPresentation
 import com.intellij.psi.search.LocalSearchScope
 import com.intellij.psi.search.SearchScope
 
@@ -30,10 +31,10 @@ interface SearchTarget {
   /**
    * @return presentation to be displayed in the disambiguation popup
    * when several [different][equals] targets exist to choose from,
-   * or in the Usage View (only [icon][TargetPopupPresentation.getIcon]
-   * and [presentable text][TargetPopupPresentation.getPresentableText] are used)
+   * or in the Usage View (only [icon][TargetPresentation.icon]
+   * and [presentable text][TargetPresentation.presentableText] are used)
    */
-  val presentation: TargetPopupPresentation
+  val presentation: TargetPresentation
 
   /**
    * @see UsageHandler.createEmptyUsageHandler
@@ -50,7 +51,7 @@ interface SearchTarget {
    * @return collection of strings to search for text occurrences
    */
   @JvmDefault
-  val textSearchStrings: Collection<String>
+  val textSearchRequests: Collection<SearchRequest>
     get() = emptyList()
 
   /**

@@ -217,10 +217,10 @@ public class Mappings {
 
   @Nullable
   private ClassFileRepr getReprByName(@Nullable File source, int qName) {
-    final Iterable<File> sources = source != null? Collections.singleton(source) : classToSourceFileGet(qName);
+    final Iterable<String> sources = source != null? Collections.singleton(toRelative(source)) : myClassToRelativeSourceFilePath.get(qName);
     if (sources != null) {
-      for (File src : sources) {
-        final Collection<ClassFileRepr> reprs = sourceFileToClassesGet(src);
+      for (String src : sources) {
+        final Collection<ClassFileRepr> reprs = myRelativeSourceFilePathToClasses.get(src);
         if (reprs != null) {
           for (ClassFileRepr repr : reprs) {
             if (repr.name == qName) {
@@ -441,11 +441,11 @@ public class Mappings {
         visitedClasses = new TIntHashSet();
         visitedClasses.add(fromClass.name);
       }
-      for (int superName : fromClass.getSupers()) {
-        if (!visitedClasses.add(superName) || superName == myObjectClassName) {
+      for (TypeRepr.ClassType superName : fromClass.getSuperTypes()) {
+        if (!visitedClasses.add(superName.className) || superName.className == myObjectClassName) {
           continue;
         }
-        final ClassRepr superClass = classReprByName(superName);
+        final ClassRepr superClass = classReprByName(superName.className);
         if (superClass != null) {
           for (MethodRepr mm : superClass.findMethods(predicate)) {
             if (isVisibleIn(superClass, mm, fromClass)) {
@@ -465,11 +465,11 @@ public class Mappings {
         visitedClasses = new TIntHashSet();
         visitedClasses.add(fromClass.name);
       }
-      for (int superName : fromClass.getSupers()) {
-        if (!visitedClasses.add(superName) || superName == myObjectClassName) {
+      for (TypeRepr.ClassType superName : fromClass.getSuperTypes()) {
+        if (!visitedClasses.add(superName.className) || superName.className == myObjectClassName) {
           continue;
         }
-        final ClassRepr superClass = classReprByName(superName);
+        final ClassRepr superClass = classReprByName(superName.className);
         if (superClass == null || extendsLibraryClass(superClass, visitedClasses)) {
           return true;
         }
@@ -482,11 +482,11 @@ public class Mappings {
         visitedClasses = new TIntHashSet();
         visitedClasses.add(fromClass.name);
       }
-      for (int superName : fromClass.getSupers()) {
-        if (!visitedClasses.add(superName) || superName == myObjectClassName) {
+      for (TypeRepr.ClassType superName : fromClass.getSuperTypes()) {
+        if (!visitedClasses.add(superName.className) || superName.className == myObjectClassName) {
           continue;  // prevent SOE
         }
-        final ClassRepr superClass = classReprByName(superName);
+        final ClassRepr superClass = classReprByName(superName.className);
         if (superClass != null) {
           boolean cont = true;
           final Collection<MethodRepr> methods = superClass.findMethods(predicate);
@@ -511,11 +511,11 @@ public class Mappings {
         visitedClasses = new TIntHashSet();
         visitedClasses.add(fromClass.name);
       }
-      for (int supername : fromClass.getSupers()) {
-        if (!visitedClasses.add(supername) || supername == myObjectClassName) {
+      for (TypeRepr.ClassType supername : fromClass.getSuperTypes()) {
+        if (!visitedClasses.add(supername.className) || supername.className == myObjectClassName) {
           continue;
         }
-        final ClassRepr superClass = classReprByName(supername);
+        final ClassRepr superClass = classReprByName(supername.className);
         if (superClass != null) {
           final FieldRepr ff = superClass.findField(f.name);
           if (ff != null && isVisibleIn(superClass, ff, fromClass)) {
@@ -533,11 +533,11 @@ public class Mappings {
         visitedClasses = new TIntHashSet();
         visitedClasses.add(fromClass.name);
       }
-      for (int supername : fromClass.getSupers()) {
-        if (!visitedClasses.add(supername) || supername == myObjectClassName) {
+      for (TypeRepr.ClassType supername : fromClass.getSuperTypes()) {
+        if (!visitedClasses.add(supername.className) || supername.className == myObjectClassName) {
           continue;
         }
-        final ClassRepr superClass = classReprByName(supername);
+        final ClassRepr superClass = classReprByName(supername.className);
         if (superClass != null) {
           final FieldRepr ff = superClass.findField(f.name);
           if (ff != null && isVisibleIn(superClass, ff, fromClass)) {
@@ -550,6 +550,28 @@ public class Mappings {
         }
       }
       return false;
+    }
+
+    // test if a ClassRepr is a SAM interface
+    boolean isLambdaTarget(int name) {
+      final ClassRepr cls = classReprByName(name);
+      if (cls == null || !cls.isInterface()) {
+        return false;
+      }
+      int amFound = 0;
+      for (MethodRepr method : allMethodsRecursively(cls)) {
+        if (method.isAbstract() && ++amFound > 1) {
+          return false;
+        }
+      }
+      return amFound == 1;
+    }
+
+    private Iterable<MethodRepr> allMethodsRecursively(ClassRepr cls) {
+      return Iterators.flat(cls.getMethods(), Iterators.flat(Iterators.map(cls.getSuperTypes(), st -> {
+        final ClassRepr cr = classReprByName(st.className);
+        return cr != null ? allMethodsRecursively(cr) : Collections.emptyList();
+      })));
     }
 
     @Nullable
@@ -590,11 +612,11 @@ public class Mappings {
           visitedClasses = new TIntHashSet();
           visitedClasses.add(who);
         }
-        for (int s : repr.getSupers()) {
-          if (!visitedClasses.add(s)) {
+        for (TypeRepr.ClassType s : repr.getSuperTypes()) {
+          if (!visitedClasses.add(s.className)) {
             continue;
           }
-          final Boolean inheritorOf = isInheritorOf(s, whom, visitedClasses);
+          final Boolean inheritorOf = isInheritorOf(s.className, whom, visitedClasses);
           if (inheritorOf != null && inheritorOf) {
             return true;
           }
@@ -650,10 +672,14 @@ public class Mappings {
     void collectSupersRecursively(final int className, @NotNull final TIntHashSet container) {
       final ClassRepr classRepr = classReprByName(className);
       if (classRepr != null) {
-        final int[] supers = classRepr.getSupers();
-        if (container.addAll(supers)) {
-          for (int aSuper : supers) {
-            collectSupersRecursively(aSuper, container);
+        final Iterable<TypeRepr.ClassType> supers = classRepr.getSuperTypes();
+        boolean added = false;
+        for (TypeRepr.ClassType aSuper : supers) {
+          added |= container.add(aSuper.className);
+        }
+        if (added) {
+          for (TypeRepr.ClassType aSuper : supers) {
+            collectSupersRecursively(aSuper.className, container);
           }
         }
       }
@@ -823,6 +849,18 @@ public class Mappings {
       }.perform(moduleName);
     }
 
+    void affectLambdaInstantiations(Differential.DiffState state, final int className) {
+      getAllSubclasses(className).forEach(name -> {
+        if (isLambdaTarget(name)) {
+          debug("The interface could be not a SAM interface anymore or lambda target method name has changed => affecting lambda instantiations for ", name);
+          if (state.myAffectedUsages.add(UsageRepr.createClassNewUsage(myContext, name))) {
+            appendDependents(name, state.myDependants);
+          }
+        }
+        return true;
+      });
+    }
+
     public class FileFilterConstraint implements UsageConstraint {
       @NotNull
       private final DependentFilesFilter myFilter;
@@ -929,15 +967,14 @@ public class Mappings {
   }
 
   private TIntHashSet addAllSubclasses(final int root, final TIntHashSet acc) {
-    if (!acc.add(root)) {
-      return acc;
-    }
-    final TIntHashSet directSubclasses = myClassToSubclasses.get(root);
-    if (directSubclasses != null) {
-      directSubclasses.forEach(s -> {
-        addAllSubclasses(s, acc);
-        return true;
-      });
+    if (acc.add(root)) {
+      final TIntHashSet directSubclasses = myClassToSubclasses.get(root);
+      if (directSubclasses != null) {
+        directSubclasses.forEach(s -> {
+          addAllSubclasses(s, acc);
+          return true;
+        });
+      }
     }
     return acc;
   }
@@ -978,27 +1015,31 @@ public class Mappings {
       });
     }
 
-    final String packageName = ClassRepr.getPackageName(myContext.getValue(isField ? owner : member.name));
+    final String cName = myContext.getValue(isField ? owner : member.name);
+    if (cName != null) {
+      final String packageName = ClassRepr.getPackageName(cName);
 
-    debug("Softening non-incremental decision: adding all package classes for a recompilation");
-    debug("Package name: ", packageName);
+      debug("Softening non-incremental decision: adding all package classes for a recompilation");
+      debug("Package name: ", packageName);
 
-    // Package-local branch
-    myClassToRelativeSourceFilePath.forEachEntry(new TIntObjectProcedure<Collection<String>>() {
-      @Override
-      public boolean execute(int className, Collection<String> relFilePaths) {
-        if (ClassRepr.getPackageName(myContext.getValue(className)).equals(packageName)) {
-          for (String rel : relFilePaths) {
-            File file = toFull(rel);
-            if (filter == null || filter.accept(file)) {
-              debug("Adding: ", rel);
-              toRecompile.add(file);
+      // Package-local branch
+      myClassToRelativeSourceFilePath.forEachEntry(new TIntObjectProcedure<Collection<String>>() {
+        @Override
+        public boolean execute(int className, Collection<String> relFilePaths) {
+          final String clsName = myContext.getValue(className);
+          if (clsName != null && ClassRepr.getPackageName(clsName).equals(packageName)) {
+            for (String rel : relFilePaths) {
+              File file = toFull(rel);
+              if (filter == null || filter.accept(file)) {
+                debug("Adding: ", rel);
+                toRecompile.add(file);
+              }
             }
           }
+          return true;
         }
-        return true;
-      }
-    });
+      });
+    }
 
     // filtering already compiled and non-existing paths
     toRecompile.removeAll(currentlyCompiled);
@@ -1162,18 +1203,32 @@ public class Mappings {
       assert myPresent != null;
       assert myAffectedFiles != null;
 
-      final Supplier<ClassRepr> oldClassRepr = lazy(() -> getClassReprByName(null, it.name));
       for (final MethodRepr m : added) {
-        debug("Method: ", m.name);
         if (!m.isPrivate() && (it.isInterface() || it.isAbstract() || m.isAbstract())) {
+          debug("Method: ", m.name);
           debug("Class is abstract, or is interface, or added non-private method is abstract => affecting all subclasses");
           myFuture.affectSubclasses(it.name, myAffectedFiles, state.myAffectedUsages, state.myDependants, false, myCompiledFiles, null);
+          break;
         }
+      }
+
+      if (it.isInterface()) {
+        for (final MethodRepr m : added) {
+          if (!m.isPrivate() && m.isAbstract()) {
+            debug("Added non-private abstract method: ", m.name);
+            myPresent.affectLambdaInstantiations(state, it.name);
+            break;
+          }
+        }
+      }
+
+      final Supplier<ClassRepr> oldClassRepr = lazy(() -> getClassReprByName(null, it.name)); // todo: 'it' appears already to be the oldRepr, should we lookup it additionally?
+      for (final MethodRepr m : added) {
+        debug("Method: ", m.name);
 
         final Supplier<TIntHashSet> propagated = lazy(()-> myFuture.propagateMethodAccess(m, it.name));
 
         if (!m.isPrivate()) {
-
           final ClassRepr oldRepr = oldClassRepr.get();
           if (oldRepr == null || !myPresent.hasOverriddenMethods(oldRepr, MethodRepr.equalByJavaRules(m), null)) {
             if (m.myArgumentTypes.length > 0) {
@@ -1244,8 +1299,7 @@ public class Mappings {
             }
           }
 
-          final TIntHashSet subClasses = getAllSubclasses(it.name);
-          subClasses.forEach(subClass -> {
+          getAllSubclasses(it.name).forEach(subClass -> {
             final ClassRepr r = myFuture.classReprByName(subClass);
             if (r == null) {
               return true;
@@ -1391,8 +1445,19 @@ public class Mappings {
       }
       debug("Processing changed methods:");
 
+      assert myPresent != null;
       assert myFuture != null;
       assert myAffectedFiles != null;
+
+      if (it.isInterface()) {
+        for (final Pair<MethodRepr, MethodRepr.Diff> mr : changed) {
+          if ((mr.second.removedModifiers() & Opcodes.ACC_ABSTRACT) != 0) {
+            debug("Method became non-abstract: ", mr.first.name);
+            myPresent.affectLambdaInstantiations(state, it.name);
+            break;
+          }
+        }
+      }
 
       for (final Pair<MethodRepr, MethodRepr.Diff> mr : changed) {
         final MethodRepr m = mr.first;
@@ -1495,6 +1560,9 @@ public class Mappings {
                   (d.addedModifiers() & Opcodes.ACC_ABSTRACT) != 0) {
                 debug("Added final, public or abstract specifier --- affecting subclasses");
                 myFuture.affectSubclasses(it.name, myAffectedFiles, state.myAffectedUsages, state.myDependants, false, myCompiledFiles, null);
+                if (it.isInterface() && (d.addedModifiers() & Opcodes.ACC_ABSTRACT) != 0) {
+                  myPresent.affectLambdaInstantiations(state, it.name);
+                }
               }
 
               if ((d.addedModifiers() & Opcodes.ACC_PROTECTED) != 0 && (d.removedModifiers() & Opcodes.ACC_PRIVATE) == 0) {
@@ -1567,8 +1635,7 @@ public class Mappings {
         debug("Field: ", f.name);
 
         if (!f.isPrivate()) {
-          final TIntHashSet subClasses = getAllSubclasses(classRepr.name);
-          subClasses.forEach(subClass -> {
+          getAllSubclasses(classRepr.name).forEach(subClass -> {
             final ClassRepr r = myFuture.classReprByName(subClass);
             if (r != null) {
               final Iterable<File> sourceFileNames = classToSourceFileGet(subClass);
@@ -2137,8 +2204,8 @@ public class Mappings {
         debug("Class name: ", c.name);
         myDelta.addAddedClass(c);
 
-        for (final int sup : c.getSupers()) {
-          myDelta.registerAddedSuperClass(c.name, sup);
+        for (final TypeRepr.ClassType sup : c.getSuperTypes()) {
+          myDelta.registerAddedSuperClass(c.name, sup.className);
         }
 
         if (!myEasyMode && !c.isAnonymous() && !c.isLocal()) {
@@ -2350,9 +2417,9 @@ public class Mappings {
             }
             for (FileClasses compiledFile : newClasses) {
               for (ClassRepr aClass : compiledFile.myFileClasses) {
-                for (int parent : aClass.getSupers()) {
-                  if (addedNames.contains(parent)) {
-                    myDelta.registerAddedSuperClass(aClass.name, parent);
+                for (TypeRepr.ClassType parent : aClass.getSuperTypes()) {
+                  if (addedNames.contains(parent.className)) {
+                    myDelta.registerAddedSuperClass(aClass.name, parent.className);
                   }
                 }
               }
@@ -2565,8 +2632,8 @@ public class Mappings {
     }
 
     if (cr instanceof ClassRepr) {
-      for (final int superSomething : ((ClassRepr)cr).getSupers()) {
-        delta.registerRemovedSuperClass(className, superSomething);
+      for (final TypeRepr.ClassType superSomething : ((ClassRepr)cr).getSuperTypes()) {
+        delta.registerRemovedSuperClass(className, superSomething.className);
       }
     }
 
@@ -2820,8 +2887,8 @@ public class Mappings {
             }
 
             if (result instanceof ClassRepr) {
-              for (final int s : ((ClassRepr)result).getSupers()) {
-                myClassToSubclasses.put(s, className);
+              for (final TypeRepr.ClassType s : ((ClassRepr)result).getSuperTypes()) {
+                myClassToSubclasses.put(s.className, className);
               }
             }
 
@@ -2980,18 +3047,13 @@ public class Mappings {
     }
   }
 
-  private static boolean addAll(final TIntHashSet whereToAdd, TIntHashSet whatToAdd) {
-    if (whatToAdd.isEmpty()) {
-      return false;
+  private static void addAll(final TIntHashSet whereToAdd, TIntHashSet whatToAdd) {
+    if (!whatToAdd.isEmpty()) {
+      whatToAdd.forEach(value -> {
+        whereToAdd.add(value);
+        return true;
+      });
     }
-    final Ref<Boolean> changed = new Ref<>(Boolean.FALSE);
-    whatToAdd.forEach(value -> {
-      if (whereToAdd.add(value)) {
-        changed.set(Boolean.TRUE);
-      }
-      return true;
-    });
-    return changed.get();
   }
 
   private static void addAllKeys(final TIntHashSet whereToAdd, final IntIntMultiMaplet maplet) {
